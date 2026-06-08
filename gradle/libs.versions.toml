@@ -1,12 +1,18 @@
 [versions]
 agp                = "8.5.2"
 kotlin             = "2.0.21"
+ksp                = "2.0.21-1.0.28"
+room               = "2.6.1"
 compose-bom        = "2024.09.00"
 activity-compose   = "1.9.2"
 navigation-compose = "2.8.1"
 maps-compose       = "6.1.0"
 play-services-maps = "19.0.0"
+play-services-location = "21.3.0"
 coroutines         = "1.8.1"
+retrofit           = "2.11.0"
+okhttp-bom         = "4.12.0"
+security-crypto    = "1.1.0-alpha06"
 
 [libraries]
 androidx-activity-compose       = { group = "androidx.activity",         name = "activity-compose",           version.ref = "activity-compose" }
@@ -20,9 +26,20 @@ compose-material-icons-extended = { group = "androidx.compose.material",  name =
 navigation-compose              = { group = "androidx.navigation",         name = "navigation-compose",         version.ref = "navigation-compose" }
 maps-compose                    = { group = "com.google.maps.android",    name = "maps-compose",               version.ref = "maps-compose" }
 play-services-maps              = { group = "com.google.android.gms",     name = "play-services-maps",         version.ref = "play-services-maps" }
+play-services-location          = { group = "com.google.android.gms",     name = "play-services-location",     version.ref = "play-services-location" }
 kotlinx-coroutines-android      = { group = "org.jetbrains.kotlinx",      name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+retrofit-core                   = { group = "com.squareup.retrofit2",     name = "retrofit",                   version.ref = "retrofit" }
+retrofit-gson                   = { group = "com.squareup.retrofit2",     name = "converter-gson",             version.ref = "retrofit" }
+okhttp-bom                      = { group = "com.squareup.okhttp3",       name = "okhttp-bom",                 version.ref = "okhttp-bom" }
+okhttp-core                     = { group = "com.squareup.okhttp3",       name = "okhttp" }
+okhttp-logging                  = { group = "com.squareup.okhttp3",       name = "logging-interceptor" }
+androidx-security-crypto        = { group = "androidx.security",         name = "security-crypto",            version.ref = "security-crypto" }
+room-runtime                    = { group = "androidx.room", name = "room-runtime",  version.ref = "room" }
+room-ktx                        = { group = "androidx.room", name = "room-ktx",      version.ref = "room" }
+room-compiler                   = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 
 [plugins]
 android-application = { id = "com.android.application",             version.ref = "agp" }
 kotlin-android      = { id = "org.jetbrains.kotlin.android",        version.ref = "kotlin" }
 kotlin-compose      = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp                 = { id = "com.google.devtools.ksp",              version.ref = "ksp" }

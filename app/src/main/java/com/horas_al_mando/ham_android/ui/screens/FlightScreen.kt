@@ -1,5 +1,11 @@
 package com.horas_al_mando.ham_android.ui.screens
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -7,92 +13,127 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.maps.android.compose.*
+import com.horas_al_mando.ham_android.R
 import com.horas_al_mando.ham_android.ui.CLEAN_MAP_STYLE_JSON
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.gson.Gson
+import com.horas_al_mando.ham_android.db.AppDatabase
+import com.horas_al_mando.ham_android.db.InProgressFlightPointEntity
+import com.horas_al_mando.ham_android.db.PendingFlightEntity
 import com.horas_al_mando.ham_android.model.FlightPoint
+import com.horas_al_mando.ham_android.model.FlightSyncPayload
+import com.horas_al_mando.ham_android.network.FlightApiService
+import com.horas_al_mando.ham_android.network.SocialRadarRepository
+import com.horas_al_mando.ham_android.service.FlightRepository
+import com.horas_al_mando.ham_android.service.FlightTrackingService
 import com.horas_al_mando.ham_android.ui.components.StatsGrid
 import com.horas_al_mando.ham_android.ui.theme.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
-import kotlin.math.*
 
-private val START_LATLNG          = LatLng(-34.6037, -58.3816)
-private const val INITIAL_HEADING = 45.0
-private const val CRUISE_ALT_M    = 1500.0
-private const val CRUISE_SPEED_KT = 105.0
-private const val CLIMB_DURATION  = 240.0
+private val START_LATLNG = LatLng(-34.6037, -58.3816)
+private val gson = Gson()
 
 @Composable
 fun FlightScreen() {
-    val scope          = rememberCoroutineScope()
-    val flightPoints   = remember { mutableStateListOf<FlightPoint>() }
-    var isFlying       by remember { mutableStateOf(false) }
-    var elapsedSeconds by remember { mutableStateOf(0L) }
-    var showDialog     by remember { mutableStateOf(false) }
-    var isUploading    by remember { mutableStateOf(false) }
-    var uploadDone     by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(isFlying) {
-        if (isFlying) {
-            while (isFlying) {
-                delay(1000)
-                elapsedSeconds++
+    val flightPoints by FlightRepository.currentFlightPath.collectAsState()
+    val isTracking by FlightRepository.isTracking.collectAsState()
+    val elapsedSeconds by FlightRepository.elapsedSeconds.collectAsState(0L)
+    val activePilots by SocialRadarRepository.activePilots.collectAsState()
+
+    DisposableEffect(Unit) {
+        // TODO: Enable when backend WebSocket /ws/radar is implemented
+        // SocialRadarRepository.connect()
+        onDispose {
+            SocialRadarRepository.disconnect()
+        }
+    }
+
+    var showDialog by remember { mutableStateOf(false) }
+    var isUploading by remember { mutableStateOf(false) }
+    var uploadDone by remember { mutableStateOf(false) }
+    var syncError by remember { mutableStateOf<String?>(null) }
+    var pendingPayload by remember { mutableStateOf<FlightSyncPayload?>(null) }
+    var showPendingDialog by remember { mutableStateOf(false) }
+    var showInterruptedDialog by remember { mutableStateOf(false) }
+    var interruptedPoints by remember { mutableStateOf<List<InProgressFlightPointEntity>>(emptyList()) }
+
+    val serverErrorMsg = stringResource(R.string.flight_server_error)
+    val connectionErrorMsg = stringResource(R.string.flight_connection_error)
+    val pilotSnippetFormat = stringResource(R.string.flight_pilot_snippet)
+
+    LaunchedEffect(Unit) {
+        val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
+        val inProgressDao = AppDatabase.getInstance(context).inProgressFlightDao()
+
+        val pending = pendingDao.get()
+        if (pending != null) {
+            pendingPayload = gson.fromJson(pending.payloadJson, FlightSyncPayload::class.java)
+            showPendingDialog = true
+            return@LaunchedEffect
+        }
+
+        if (!isTracking) {
+            val points = inProgressDao.getAll()
+            if (points.isNotEmpty()) {
+                interruptedPoints = points
+                showInterruptedDialog = true
             }
         }
     }
 
-    LaunchedEffect(isFlying) {
-        if (isFlying) {
-            while (isFlying) {
-                val i    = flightPoints.size
-                val t    = i * 2.0
-                val prev = flightPoints.lastOrNull()
+    val doSync: suspend (FlightSyncPayload) -> Unit = { payload ->
+        val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
+        val inProgressDao = AppDatabase.getInstance(context).inProgressFlightDao()
+        pendingDao.save(PendingFlightEntity(payloadJson = gson.toJson(payload)))
+        isUploading = true
+        try {
+            val response = FlightApiService.api.syncFlight(payload)
+            if (response.isSuccessful) {
+                pendingDao.delete()
+                inProgressDao.deleteAll()
+                uploadDone = true
+            } else {
+                syncError = serverErrorMsg.format(response.code())
+            }
+        } catch (e: Exception) {
+            syncError = connectionErrorMsg.format(e.localizedMessage ?: "desconocido")
+        } finally {
+            isUploading = false
+        }
+    }
 
-                val (altitude, vs) = if (t < CLIMB_DURATION) {
-                    val alt  = 300.0 + (CRUISE_ALT_M - 300.0) * (t / CLIMB_DURATION)
-                    val rate = (CRUISE_ALT_M - 300.0) / (CLIMB_DURATION / 60.0)
-                    Pair(alt, rate)
-                } else {
-                    Pair(CRUISE_ALT_M + sin(t * 0.05) * 8.0, sin(t * 0.08) * 5.0)
-                }
+    val permissionsToRequest = mutableListOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    ).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
-                val speed = if (t < CLIMB_DURATION)
-                    CRUISE_SPEED_KT * (0.85 + 0.15 * t / CLIMB_DURATION)
-                else
-                    CRUISE_SPEED_KT + sin(t * 0.06) * 3.0
-
-                val prevHdg = prev?.heading ?: INITIAL_HEADING
-                val newHdg  = when (i) {
-                    80   -> (prevHdg + 15.0) % 360.0
-                    else -> (prevHdg + (Math.random() - 0.5) * 0.6 + 360.0) % 360.0
-                }
-
-                val speedMs = speed * 0.5144
-                val distM   = speedMs * 2.0
-                val hdgRad  = Math.toRadians(newHdg)
-                val prevLat = prev?.lat ?: START_LATLNG.latitude
-                val prevLng = prev?.lng ?: START_LATLNG.longitude
-                val newLat  = prevLat + (distM * cos(hdgRad)) / 111320.0
-                val newLng  = prevLng + (distM * sin(hdgRad)) / (111320.0 * cos(Math.toRadians(prevLat)))
-                val pressure = 1013.25 * (1.0 - altitude / 44330.0).pow(5.2561)
-
-                flightPoints.add(FlightPoint(
-                    lat           = newLat,
-                    lng           = newLng,
-                    timestamp     = Instant.now().toString(),
-                    altitude      = altitude,
-                    speed         = speed,
-                    heading       = newHdg,
-                    verticalSpeed = vs,
-                    pressure      = pressure,
-                ))
-                delay(2000)
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        val allGranted = perms.values.all { it }
+        if (allGranted) {
+            val intent = Intent(context, FlightTrackingService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
             }
         }
     }
@@ -102,51 +143,146 @@ fun FlightScreen() {
         position = CameraPosition.fromLatLngZoom(START_LATLNG, 13f)
     }
 
-    LaunchedEffect(currentPoint) {
-        if (currentPoint != null && isFlying) {
-            cameraPositionState.position =
-                CameraPosition.fromLatLngZoom(LatLng(currentPoint.lat, currentPoint.lng), 13f)
-        }
-    }
-
-    val mapUiSettings  = remember { MapUiSettings(zoomControlsEnabled = false) }
-    val mapProperties  = remember {
+    val mapUiSettings = remember { MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true) }
+    val mapProperties = remember(isTracking) {
         MapProperties(
-            isMyLocationEnabled = false,
-            mapStyleOptions     = MapStyleOptions(CLEAN_MAP_STYLE_JSON),
+            isMyLocationEnabled = isTracking,
+            mapStyleOptions = MapStyleOptions(CLEAN_MAP_STYLE_JSON),
         )
     }
     val polylinePoints = remember(flightPoints.size) { flightPoints.map { LatLng(it.lat, it.lng) } }
-    val markerState    = remember { MarkerState(position = START_LATLNG) }
+    val markerState = remember { MarkerState(position = START_LATLNG) }
+
+    var hasCenteredInitially by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isTracking) {
+        if (!isTracking) hasCenteredInitially = false
+    }
+
     LaunchedEffect(currentPoint) {
-        currentPoint?.let { markerState.position = LatLng(it.lat, it.lng) }
+        currentPoint?.let {
+            if (it.lat != 0.0 && it.lng != 0.0) {
+                markerState.position = LatLng(it.lat, it.lng)
+                if (isTracking && !hasCenteredInitially) {
+                    cameraPositionState.position =
+                        CameraPosition.fromLatLngZoom(LatLng(it.lat, it.lng), 15f)
+                    hasCenteredInitially = true
+                }
+            }
+        }
+    }
+
+    if (showInterruptedDialog && interruptedPoints.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = {},
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(stringResource(R.string.flight_interrupted_title)) },
+            text = { Text(stringResource(R.string.flight_interrupted_message, interruptedPoints.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showInterruptedDialog = false
+                    showDialog = true
+                    val points = interruptedPoints.map {
+                        FlightPoint(
+                            lat = it.lat, lng = it.lng, timestamp = it.timestamp,
+                            altitude = it.altitude, speed = it.speed, heading = it.heading,
+                            verticalSpeed = it.verticalSpeed, pressure = it.pressure
+                        )
+                    }
+                    val payload = FlightSyncPayload(
+                        pilotId = FlightRepository.getPilotId(),
+                        startTime = points.first().timestamp,
+                        endTime = Instant.now().toString(),
+                        path = points
+                    )
+                    scope.launch { doSync(payload) }
+                }) { Text(stringResource(R.string.flight_pending_upload)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showInterruptedDialog = false
+                    interruptedPoints = emptyList()
+                    scope.launch {
+                        AppDatabase.getInstance(context).inProgressFlightDao().deleteAll()
+                    }
+                }) { Text(stringResource(R.string.flight_pending_discard)) }
+            }
+        )
+    }
+
+    if (showPendingDialog && pendingPayload != null) {
+        AlertDialog(
+            onDismissRequest = {},
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(stringResource(R.string.flight_pending_title)) },
+            text = { Text(stringResource(R.string.flight_pending_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPendingDialog = false
+                    showDialog = true
+                    val payload = pendingPayload!!
+                    scope.launch { doSync(payload) }
+                }) { Text(stringResource(R.string.flight_pending_upload)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPendingDialog = false
+                    pendingPayload = null
+                    scope.launch { AppDatabase.getInstance(context).pendingFlightDao().delete() }
+                }) { Text(stringResource(R.string.flight_pending_discard)) }
+            }
+        )
     }
 
     if (showDialog) {
         val durationMin = elapsedSeconds / 60
         AlertDialog(
             onDismissRequest = {},
-            shape            = RoundedCornerShape(20.dp),
-            title            = { Text("Vuelo finalizado") },
-            text             = {
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    when {
+                        uploadDone -> stringResource(R.string.flight_sync_success_title)
+                        syncError != null -> stringResource(R.string.flight_sync_error_title)
+                        else -> stringResource(R.string.flight_finished_title)
+                    }
+                )
+            },
+            text = {
                 when {
                     isUploading -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text("Subiendo datos del vuelo…")
+                        Text(stringResource(R.string.flight_uploading_message))
                     }
-                    uploadDone  -> Text("¡Vuelo sincronizado correctamente!")
-                    else        -> Text("Vuelo de $durationMin minutos, ${flightPoints.size} puntos registrados.")
+                    uploadDone -> Text(stringResource(R.string.flight_sync_success_message))
+                    syncError != null -> Text(syncError!!)
+                    else -> Text(stringResource(R.string.flight_sync_summary, durationMin.toInt(), flightPoints.size))
                 }
             },
             confirmButton = {
                 if (!isUploading) {
-                    TextButton(onClick = {
-                        showDialog     = false
-                        uploadDone     = false
-                        flightPoints.clear()
-                        elapsedSeconds = 0
-                    }) { Text("Cerrar") }
+                    Row {
+                        if (syncError != null) {
+                            TextButton(onClick = {
+                                syncError = null
+                                scope.launch {
+                                    val dao = AppDatabase.getInstance(context).pendingFlightDao()
+                                    val pending = dao.get()
+                                    if (pending != null) {
+                                        val payload = gson.fromJson(pending.payloadJson, FlightSyncPayload::class.java)
+                                        doSync(payload)
+                                    }
+                                }
+                            }) { Text(stringResource(R.string.flight_retry_button)) }
+                        }
+                        TextButton(onClick = {
+                            showDialog = false
+                            uploadDone = false
+                            syncError = null
+                            FlightRepository.setTracking(false)
+                        }) { Text(stringResource(R.string.flight_close_button)) }
+                    }
                 }
             },
         )
@@ -154,34 +290,45 @@ fun FlightScreen() {
 
     Box(Modifier.fillMaxSize()) {
         GoogleMap(
-            modifier            = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
-            uiSettings          = mapUiSettings,
-            properties          = mapProperties,
+            uiSettings = mapUiSettings,
+            properties = mapProperties,
         ) {
             if (polylinePoints.size > 1) {
                 Polyline(
                     points = polylinePoints,
-                    color  = Primary,
-                    width  = 5f,
+                    color = Primary,
+                    width = 5f,
                 )
             }
             if (currentPoint != null) {
                 Marker(
                     state = markerState,
-                    title = "Posición actual",
+                    title = stringResource(R.string.flight_my_position),
                 )
+            }
+
+            activePilots.forEach { pilot ->
+                if (pilot.pilotId != com.horas_al_mando.ham_android.model.MockData.PILOT_ID) {
+                    Marker(
+                        state = rememberMarkerState(position = LatLng(pilot.lat, pilot.lng)),
+                        title = pilot.name,
+                        snippet = pilotSnippetFormat.format(pilot.altitude, pilot.speed),
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                    )
+                }
             }
         }
 
         Card(
-            modifier  = Modifier
+            modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .padding(16.dp),
-            shape     = RoundedCornerShape(24.dp),
-            colors    = CardDefaults.cardColors(containerColor = Surface),
-            border    = BorderStroke(1.dp, Outline),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Surface),
+            border = BorderStroke(1.dp, Outline),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
             Column(
@@ -190,36 +337,46 @@ fun FlightScreen() {
             ) {
                 StatsGrid(
                     altitude = currentPoint?.altitude?.let { "%.0f".format(it) } ?: "--",
-                    speed    = currentPoint?.speed?.let    { "%.0f".format(it) } ?: "--",
-                    heading  = currentPoint?.heading?.let  { "%.0f".format(it) } ?: "--",
-                    elapsed  = formatElapsed(elapsedSeconds),
+                    speed = currentPoint?.speed?.let { "%.0f".format(it) } ?: "--",
+                    heading = currentPoint?.heading?.let { "%.0f".format(it) } ?: "--",
+                    elapsed = formatElapsed(elapsedSeconds),
                 )
 
-                if (!isFlying) {
+                if (!isTracking) {
                     Button(
-                        onClick        = { isFlying = true },
-                        modifier       = Modifier.fillMaxWidth(),
+                        onClick = {
+                            val allGranted = permissionsToRequest.all {
+                                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                            }
+                            if (allGranted) {
+                                val intent = Intent(context, FlightTrackingService::class.java)
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    context.startForegroundService(intent)
+                                } else {
+                                    context.startService(intent)
+                                }
+                            } else {
+                                launcher.launch(permissionsToRequest.toTypedArray())
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
                     ) {
-                        Text("Iniciar Vuelo", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.flight_start_button), fontWeight = FontWeight.SemiBold)
                     }
                 } else {
                     Button(
                         onClick = {
-                            isFlying   = false
+                            val payload = FlightRepository.getSyncPayload()
+                            context.stopService(Intent(context, FlightTrackingService::class.java))
                             showDialog = true
-                            scope.launch {
-                                isUploading = true
-                                delay(2000)
-                                isUploading = false
-                                uploadDone  = true
-                            }
+                            scope.launch { doSync(payload) }
                         },
-                        modifier       = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-                        colors         = ButtonDefaults.buttonColors(containerColor = Destructive),
+                        colors = ButtonDefaults.buttonColors(containerColor = Destructive),
                     ) {
-                        Text("Finalizar Vuelo", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.flight_end_button), fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
