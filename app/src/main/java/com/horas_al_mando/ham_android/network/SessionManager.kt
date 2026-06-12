@@ -21,6 +21,7 @@ class SessionManager(context: Context) {
     companion object {
         private const val KEY_TOKEN = "jwt_token"
         private const val KEY_USER_ID = "user_id"
+        private const val KEY_CLIENT_FLIGHT_ID = "client_flight_id"
     }
 
     fun saveAuthToken(token: String) {
@@ -37,6 +38,18 @@ class SessionManager(context: Context) {
 
     fun getUserId(): String? {
         return prefs.getString(KEY_USER_ID, null)
+    }
+
+    fun saveClientFlightId(id: String) {
+        prefs.edit().putString(KEY_CLIENT_FLIGHT_ID, id).apply()
+    }
+
+    fun getClientFlightId(): String? {
+        return prefs.getString(KEY_CLIENT_FLIGHT_ID, null)
+    }
+
+    fun clearClientFlightId() {
+        prefs.edit().remove(KEY_CLIENT_FLIGHT_ID).apply()
     }
 
     fun clearSession() {

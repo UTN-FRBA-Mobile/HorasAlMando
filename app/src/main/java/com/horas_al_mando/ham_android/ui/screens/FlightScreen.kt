@@ -13,11 +13,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
@@ -31,6 +34,7 @@ import com.horas_al_mando.ham_android.db.InProgressFlightPointEntity
 import com.horas_al_mando.ham_android.db.PendingFlightEntity
 import com.horas_al_mando.ham_android.model.FlightPoint
 import com.horas_al_mando.ham_android.model.FlightSyncPayload
+import com.horas_al_mando.ham_android.network.ApiClient
 import com.horas_al_mando.ham_android.network.FlightApiService
 import com.horas_al_mando.ham_android.network.SocialRadarRepository
 import com.horas_al_mando.ham_android.service.FlightRepository
@@ -52,14 +56,6 @@ fun FlightScreen() {
     val isTracking by FlightRepository.isTracking.collectAsState()
     val elapsedSeconds by FlightRepository.elapsedSeconds.collectAsState(0L)
     val activePilots by SocialRadarRepository.activePilots.collectAsState()
-
-    DisposableEffect(Unit) {
-        // TODO: Enable when backend WebSocket /ws/radar is implemented
-        // SocialRadarRepository.connect()
-        onDispose {
-            SocialRadarRepository.disconnect()
-        }
-    }
 
     var showDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
@@ -94,16 +90,18 @@ fun FlightScreen() {
         }
     }
 
-    val doSync: suspend (FlightSyncPayload) -> Unit = { payload ->
+    val doFinish: suspend (FlightSyncPayload) -> Unit = { payload ->
         val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
         val inProgressDao = AppDatabase.getInstance(context).inProgressFlightDao()
         pendingDao.save(PendingFlightEntity(payloadJson = gson.toJson(payload)))
         isUploading = true
         try {
-            val response = FlightApiService.api.syncFlight(payload)
+            val response = FlightApiService.api.finishFlight(payload)
             if (response.isSuccessful) {
                 pendingDao.delete()
                 inProgressDao.deleteAll()
+                FlightRepository.clearFlight()
+                ApiClient.getSessionManager().clearClientFlightId()
                 uploadDone = true
             } else {
                 syncError = serverErrorMsg.format(response.code())
@@ -143,7 +141,9 @@ fun FlightScreen() {
         position = CameraPosition.fromLatLngZoom(START_LATLNG, 13f)
     }
 
-    val mapUiSettings = remember { MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true) }
+    val mapUiSettings = remember { MapUiSettings(zoomControlsEnabled = true, myLocationButtonEnabled = true) }
+    val density = LocalDensity.current
+    var statsCardHeightPx by remember { mutableIntStateOf(0) }
     val mapProperties = remember(isTracking) {
         MapProperties(
             isMyLocationEnabled = isTracking,
@@ -162,11 +162,15 @@ fun FlightScreen() {
     LaunchedEffect(currentPoint) {
         currentPoint?.let {
             if (it.lat != 0.0 && it.lng != 0.0) {
-                markerState.position = LatLng(it.lat, it.lng)
-                if (isTracking && !hasCenteredInitially) {
-                    cameraPositionState.position =
-                        CameraPosition.fromLatLngZoom(LatLng(it.lat, it.lng), 15f)
-                    hasCenteredInitially = true
+                val pos = LatLng(it.lat, it.lng)
+                markerState.position = pos
+                if (isTracking) {
+                    if (!hasCenteredInitially) {
+                        cameraPositionState.position = CameraPosition.fromLatLngZoom(pos, 15f)
+                        hasCenteredInitially = true
+                    } else {
+                        cameraPositionState.animate(CameraUpdateFactory.newLatLng(pos))
+                    }
                 }
             }
         }
@@ -189,19 +193,23 @@ fun FlightScreen() {
                             verticalSpeed = it.verticalSpeed, pressure = it.pressure
                         )
                     }
+                    val recoveredId = ApiClient.getSessionManager().getClientFlightId()
+                        ?: java.util.UUID.randomUUID().toString()
                     val payload = FlightSyncPayload(
-                        pilotId = FlightRepository.getPilotId(),
+                        clientFlightId = recoveredId,
                         startTime = points.first().timestamp,
                         endTime = Instant.now().toString(),
                         path = points
                     )
-                    scope.launch { doSync(payload) }
+                    scope.launch { doFinish(payload) }
                 }) { Text(stringResource(R.string.flight_pending_upload)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showInterruptedDialog = false
                     interruptedPoints = emptyList()
+                    FlightRepository.clearFlight()
+                    ApiClient.getSessionManager().clearClientFlightId()
                     scope.launch {
                         AppDatabase.getInstance(context).inProgressFlightDao().deleteAll()
                     }
@@ -221,13 +229,15 @@ fun FlightScreen() {
                     showPendingDialog = false
                     showDialog = true
                     val payload = pendingPayload!!
-                    scope.launch { doSync(payload) }
+                    scope.launch { doFinish(payload) }
                 }) { Text(stringResource(R.string.flight_pending_upload)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showPendingDialog = false
                     pendingPayload = null
+                    FlightRepository.clearFlight()
+                    ApiClient.getSessionManager().clearClientFlightId()
                     scope.launch { AppDatabase.getInstance(context).pendingFlightDao().delete() }
                 }) { Text(stringResource(R.string.flight_pending_discard)) }
             }
@@ -271,7 +281,7 @@ fun FlightScreen() {
                                     val pending = dao.get()
                                     if (pending != null) {
                                         val payload = gson.fromJson(pending.payloadJson, FlightSyncPayload::class.java)
-                                        doSync(payload)
+                                        doFinish(payload)
                                     }
                                 }
                             }) { Text(stringResource(R.string.flight_retry_button)) }
@@ -294,6 +304,7 @@ fun FlightScreen() {
             cameraPositionState = cameraPositionState,
             uiSettings = mapUiSettings,
             properties = mapProperties,
+            contentPadding = PaddingValues(bottom = with(density) { statsCardHeightPx.toDp() }),
         ) {
             if (polylinePoints.size > 1) {
                 Polyline(
@@ -310,9 +321,15 @@ fun FlightScreen() {
             }
 
             activePilots.forEach { pilot ->
-                if (pilot.pilotId != com.horas_al_mando.ham_android.model.MockData.PILOT_ID) {
+                if (pilot.pilotId != FlightRepository.getPilotId()) {
+                    val pilotMarkerState = remember(pilot.pilotId) {
+                        MarkerState(position = LatLng(pilot.lat, pilot.lng))
+                    }
+                    LaunchedEffect(pilot.lat, pilot.lng) {
+                        pilotMarkerState.position = LatLng(pilot.lat, pilot.lng)
+                    }
                     Marker(
-                        state = rememberMarkerState(position = LatLng(pilot.lat, pilot.lng)),
+                        state = pilotMarkerState,
                         title = pilot.name,
                         snippet = pilotSnippetFormat.format(pilot.altitude, pilot.speed),
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
@@ -325,15 +342,16 @@ fun FlightScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .padding(16.dp),
+                .onGloballyPositioned { statsCardHeightPx = it.size.height }
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Surface),
             border = BorderStroke(1.dp, Outline),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
             Column(
-                Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 StatsGrid(
                     altitude = currentPoint?.altitude?.let { "%.0f".format(it) } ?: "--",
@@ -370,7 +388,7 @@ fun FlightScreen() {
                             val payload = FlightRepository.getSyncPayload()
                             context.stopService(Intent(context, FlightTrackingService::class.java))
                             showDialog = true
-                            scope.launch { doSync(payload) }
+                            scope.launch { doFinish(payload) }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),

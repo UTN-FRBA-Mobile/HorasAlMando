@@ -1,5 +1,6 @@
 package com.horas_al_mando.ham_android.network
 
+import com.horas_al_mando.ham_android.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -7,7 +8,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
-    private const val BASE_URL = "https://api.horasalmando.com.ar/api/v1/"
+    private const val BASE_URL = BuildConfig.API_BASE_URL
 
 
     private var sessionManager: SessionManager? = null

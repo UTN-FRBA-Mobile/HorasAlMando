@@ -12,11 +12,15 @@ import com.horas_al_mando.ham_android.db.InProgressFlightPointEntity
 import com.horas_al_mando.ham_android.hardware.LocationHelper
 import com.horas_al_mando.ham_android.hardware.SensorHelper
 import com.horas_al_mando.ham_android.model.FlightPoint
+import com.horas_al_mando.ham_android.network.FlightSyncSocketRepository
+import com.horas_al_mando.ham_android.network.SessionManager
+import com.horas_al_mando.ham_android.network.SocialRadarRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.time.Instant
+import java.util.UUID
 
 object FlightRepository {
     private val _currentFlightPath = MutableStateFlow<List<FlightPoint>>(emptyList())
@@ -27,6 +31,7 @@ object FlightRepository {
 
     private var startTime: String = ""
     private var currentPilotId: Long = 0L
+    private var currentClientFlightId: String = ""
 
     private val _elapsedSeconds = MutableStateFlow(0L)
     val elapsedSeconds: StateFlow<Long> = _elapsedSeconds.asStateFlow()
@@ -45,6 +50,14 @@ object FlightRepository {
 
     fun getPilotId(): Long = currentPilotId
 
+    fun getClientFlightId(): String = currentClientFlightId
+
+    fun setClientFlightId(id: String) {
+        currentClientFlightId = id
+    }
+
+    fun getStartTime(): String = startTime
+
     fun restorePoints(points: List<FlightPoint>) {
         if (points.isNotEmpty()) {
             _currentFlightPath.value = points
@@ -55,7 +68,7 @@ object FlightRepository {
 
     fun getSyncPayload(): com.horas_al_mando.ham_android.model.FlightSyncPayload {
         return com.horas_al_mando.ham_android.model.FlightSyncPayload(
-            pilotId = currentPilotId,
+            clientFlightId = currentClientFlightId,
             startTime = startTime,
             endTime = Instant.now().toString(),
             path = _currentFlightPath.value
@@ -66,10 +79,18 @@ object FlightRepository {
         _isTracking.value = tracking
         if (tracking) {
             startTime = Instant.now().toString()
+            if (currentClientFlightId.isBlank()) {
+                currentClientFlightId = UUID.randomUUID().toString()
+            }
         } else {
             _currentFlightPath.value = emptyList()
             _elapsedSeconds.value = 0
         }
+    }
+
+    fun clearFlight() {
+        currentClientFlightId = ""
+        startTime = ""
     }
 }
 
@@ -78,6 +99,7 @@ class FlightTrackingService : Service() {
     private lateinit var locationHelper: LocationHelper
     private lateinit var sensorHelper: SensorHelper
     private var timerJob: Job? = null
+    private var streamJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var currentAltitude = 0.0
@@ -115,10 +137,6 @@ class FlightTrackingService : Service() {
                     )
                 )
             }
-
-            if (FlightRepository.isTracking.value) {
-                com.horas_al_mando.ham_android.network.SocialRadarRepository.sendLocation(point)
-            }
         }
 
         sensorHelper = SensorHelper(this) { altitude, pressure ->
@@ -133,7 +151,13 @@ class FlightTrackingService : Service() {
 
         locationHelper.startLocationUpdates()
         sensorHelper.start()
+
+        val sessionManager = SessionManager(applicationContext)
+        sessionManager.getClientFlightId()?.takeIf { it.isNotBlank() }?.let {
+            FlightRepository.setClientFlightId(it)
+        }
         FlightRepository.setTracking(true)
+        sessionManager.saveClientFlightId(FlightRepository.getClientFlightId())
 
         serviceScope.launch {
             val existing = AppDatabase.getInstance(applicationContext).inProgressFlightDao().getAll()
@@ -151,7 +175,22 @@ class FlightTrackingService : Service() {
                     )
                 }
                 FlightRepository.restorePoints(points)
-                secondsTracked = existing.size * 2L // approximate: 1 point every 2s
+                secondsTracked = existing.size * 2L
+            }
+        }
+
+        FlightSyncSocketRepository.connect(
+            FlightRepository.getClientFlightId(),
+            FlightRepository.getStartTime()
+        )
+        SocialRadarRepository.connect()
+
+        streamJob = serviceScope.launch {
+            while (isActive) {
+                delay(3000)
+                val path = FlightRepository.currentFlightPath.value
+                FlightSyncSocketRepository.pushPoints(path)
+                path.lastOrNull()?.let { SocialRadarRepository.sendLocation(it) }
             }
         }
 
@@ -168,6 +207,9 @@ class FlightTrackingService : Service() {
 
     override fun onDestroy() {
         timerJob?.cancel()
+        streamJob?.cancel()
+        FlightSyncSocketRepository.disconnect()
+        SocialRadarRepository.disconnect()
         serviceScope.cancel()
         locationHelper.stopLocationUpdates()
         sensorHelper.stop()

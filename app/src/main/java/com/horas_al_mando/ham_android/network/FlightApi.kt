@@ -10,8 +10,8 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface FlightApi {
-    @POST("flights/sync")
-    suspend fun syncFlight(@Body payload: FlightSyncPayload): Response<Unit>
+    @POST("flight-tracks/finish")
+    suspend fun finishFlight(@Body payload: FlightSyncPayload): Response<Unit>
 
     @GET("flight-tracks")
     suspend fun getFlightTracks(): Response<List<FlightTrackSummary>>

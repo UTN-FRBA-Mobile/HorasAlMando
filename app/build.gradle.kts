@@ -25,6 +25,17 @@ android {
 
         manifestPlaceholders["MAPS_API_KEY"] =
             localProps.getProperty("MAPS_API_KEY", "YOUR_MAPS_API_KEY")
+
+        buildConfigField(
+            "String",
+            "API_BASE_URL",
+            "\"${localProps.getProperty("API_BASE_URL", "https://api.horasalmando.com.ar/api/v1/")}\""
+        )
+        buildConfigField(
+            "String",
+            "WS_BASE_URL",
+            "\"${localProps.getProperty("WS_BASE_URL", "wss://api.horasalmando.com.ar/api")}\""
+        )
     }
 
     compileOptions {
@@ -32,7 +43,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions { jvmTarget = "11" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 dependencies {
