@@ -5,9 +5,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.horas_al_mando.ham_android.R
 import com.horas_al_mando.ham_android.ui.theme.Secondary
 
 @Composable
@@ -38,13 +40,13 @@ fun StatsGrid(
 ) {
     Column(modifier = modifier) {
         Row(Modifier.fillMaxWidth()) {
-            StatsCell("Altitud (ft)",    altitude, Modifier.weight(1f))
-            StatsCell("Velocidad (kt)",  speed,    Modifier.weight(1f))
+            StatsCell(stringResource(R.string.stats_altitude), altitude, Modifier.weight(1f))
+            StatsCell(stringResource(R.string.stats_speed),    speed,    Modifier.weight(1f))
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth()) {
-            StatsCell("Rumbo (°)", heading, Modifier.weight(1f))
-            StatsCell("Tiempo",    elapsed, Modifier.weight(1f))
+            StatsCell(stringResource(R.string.stats_heading), heading, Modifier.weight(1f))
+            StatsCell(stringResource(R.string.stats_elapsed), elapsed, Modifier.weight(1f))
         }
     }
 }

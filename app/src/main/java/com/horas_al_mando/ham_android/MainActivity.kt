@@ -18,47 +18,109 @@ import com.horas_al_mando.ham_android.ui.components.HamBottomBar
 import com.horas_al_mando.ham_android.ui.screens.*
 import com.horas_al_mando.ham_android.ui.theme.HamTheme
 
+import androidx.compose.runtime.collectAsState
+import com.horas_al_mando.ham_android.service.FlightRepository
+import com.horas_al_mando.ham_android.network.*
+import com.horas_al_mando.ham_android.network.FlightTrackRepository
+import com.horas_al_mando.ham_android.ui.viewmodel.AuthViewModel
+
 class MainActivity : ComponentActivity() {
+    private lateinit var authRepository: AuthRepository
+    private lateinit var authViewModel: AuthViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        ApiClient.init(this)
+        val authApi = ApiClient.createService(AuthApi::class.java)
+        authRepository = AuthRepository(authApi, ApiClient.getSessionManager())
+        authViewModel = AuthViewModel(authRepository)
+
         setContent {
             HamTheme {
-                HamApp()
+                HamApp(authRepository, authViewModel)
             }
         }
     }
 }
 
 @Composable
-fun HamApp() {
+fun HamApp(authRepository: AuthRepository, authViewModel: AuthViewModel) {
     val rootNav = rememberNavController()
+    val startDestination = if (authRepository.isLoggedIn()) {
+        authRepository.getUserId()?.toLongOrNull()?.let { FlightRepository.setPilotId(it) }
+        "main"
+    } else "login"
 
-    NavHost(navController = rootNav, startDestination = "login") {
+    NavHost(navController = rootNav, startDestination = startDestination) {
         composable("login") {
-            LoginScreen(onLoginSuccess = {
-                rootNav.navigate("main") {
-                    popUpTo("login") { inclusive = true }
+            LoginScreen(
+                viewModel = authViewModel,
+                onLoginSuccess = {
+                    authRepository.getUserId()?.toLongOrNull()?.let { FlightRepository.setPilotId(it) }
+                    rootNav.navigate("main") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                },
+                onNavigateToRegister = { rootNav.navigate("register") },
+                onNavigateToVerify = { username, password ->
+                    rootNav.navigate("verify/$username/$password")
                 }
-            })
+            )
+        }
+        composable("register") {
+            RegisterScreen(
+                viewModel = authViewModel,
+                onNavigateBack = { rootNav.popBackStack() },
+                onNavigateToVerify = { username, password ->
+                    rootNav.navigate("verify/$username/$password")
+                }
+            )
+        }
+        composable("verify/{username}/{password}") { backStackEntry ->
+            val username = backStackEntry.arguments?.getString("username") ?: ""
+            val password = backStackEntry.arguments?.getString("password") ?: ""
+            VerificationScreen(
+                viewModel = authViewModel,
+                username = username,
+                password = password,
+                onVerificationSuccess = {
+                    authRepository.getUserId()?.toLongOrNull()?.let { FlightRepository.setPilotId(it) }
+                    rootNav.navigate("main") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                }
+            )
         }
         composable("main") {
-            MainScreen(onLogout = {
-                rootNav.navigate("login") {
-                    popUpTo("main") { inclusive = true }
+            val flightApi = ApiClient.createService(com.horas_al_mando.ham_android.network.FlightApi::class.java)
+            MainScreen(
+                repository           = authRepository,
+                flightTrackRepository = FlightTrackRepository(flightApi),
+                onLogout = {
+                    rootNav.navigate("login") {
+                        popUpTo("main") { inclusive = true }
+                    }
+                    authViewModel.resetState()
                 }
-            })
+            )
         }
     }
 }
 
 @Composable
-fun MainScreen(onLogout: () -> Unit) {
+fun MainScreen(
+    repository           : AuthRepository,
+    flightTrackRepository: FlightTrackRepository,
+    onLogout             : () -> Unit,
+) {
     val innerNav    = rememberNavController()
     val backStack   by innerNav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
 
-    val showBottomBar = currentRoute?.startsWith("replay") == false
+    val isTracking by FlightRepository.isTracking.collectAsState()
+    val showBottomBar = currentRoute?.startsWith("replay") == false && !isTracking
 
     Scaffold(
         bottomBar = {
@@ -87,16 +149,20 @@ fun MainScreen(onLogout: () -> Unit) {
                 FlightScreen()
             }
             composable("history") {
-                HistoryScreen(onOpenReplay = { id -> innerNav.navigate("replay/$id") })
+                HistoryScreen(
+                    repository   = flightTrackRepository,
+                    onOpenReplay = { id -> innerNav.navigate("replay/$id") },
+                )
             }
             composable("profile") {
-                ProfileScreen(onLogout = onLogout)
+                ProfileScreen(repository = repository, onLogout = onLogout)
             }
             composable("replay/{flightId}") { backStackEntry ->
-                val id = backStackEntry.arguments?.getString("flightId")?.toIntOrNull() ?: 0
+                val id = backStackEntry.arguments?.getString("flightId")?.toLongOrNull() ?: 0L
                 ReplayScreen(
-                    flightId = id,
-                    onBack   = { innerNav.popBackStack() },
+                    flightId   = id,
+                    repository = flightTrackRepository,
+                    onBack     = { innerNav.popBackStack() },
                 )
             }
         }

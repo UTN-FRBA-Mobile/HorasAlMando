@@ -1,3 +1,87 @@
 <resources>
     <string name="app_name">HAM</string>
+
+    <!-- Login -->
+    <string name="login_title">Horas Al Mando</string>
+    <string name="login_username_label">Usuario</string>
+    <string name="login_password_label">Contraseña</string>
+    <string name="login_button">Ingresar</string>
+    <string name="login_register_prompt">¿No tienes cuenta? Regístrate</string>
+
+    <!-- Register -->
+    <string name="register_title">Crear Cuenta</string>
+    <string name="register_first_name_label">Nombre</string>
+    <string name="register_last_name_label">Apellido</string>
+    <string name="register_email_label">Email</string>
+    <string name="register_username_label">Usuario (@username)</string>
+    <string name="register_password_label">Contraseña</string>
+    <string name="register_button">Registrarse</string>
+    <string name="register_back_prompt">Ya tengo cuenta. Volver al Login</string>
+
+    <!-- Verification -->
+    <string name="verification_title">Verificar Email</string>
+    <string name="verification_subtitle">Ingresa el código de 6 dígitos enviado a tu email.</string>
+    <string name="verification_code_label">Código de Verificación</string>
+    <string name="verification_button">Verificar</string>
+
+    <!-- Profile -->
+    <string name="profile_title">Mi Perfil</string>
+    <string name="profile_label_name">Nombre</string>
+    <string name="profile_label_email">Email</string>
+    <string name="profile_label_username">Usuario</string>
+    <string name="profile_label_license">Licencia</string>
+    <string name="profile_label_total_hours">Horas totales de vuelo</string>
+    <string name="profile_license_none">No especificada</string>
+    <string name="profile_logout_button">Cerrar Sesión</string>
+    <string name="profile_error_no_user_id">No se encontró ID de usuario.</string>
+    <string name="profile_error_load">Error al cargar perfil: %1$d</string>
+
+    <!-- History -->
+    <string name="history_title">Historial de Vuelos</string>
+    <string name="history_empty">No tenés vuelos registrados.</string>
+
+    <!-- Replay -->
+    <string name="replay_not_found">Vuelo no encontrado.</string>
+    <string name="replay_back_button">Volver</string>
+    <string name="replay_reset_button">Reiniciar</string>
+    <string name="replay_pause_button">Pausar</string>
+    <string name="replay_play_button">Reproducir</string>
+
+    <!-- Flight screen -->
+    <string name="flight_pending_title">Vuelo pendiente</string>
+    <string name="flight_pending_message">Hay un vuelo sin sincronizar. ¿Subir ahora?</string>
+    <string name="flight_pending_upload">Subir</string>
+    <string name="flight_pending_discard">Descartar</string>
+    <string name="flight_sync_success_title">¡Éxito!</string>
+    <string name="flight_sync_error_title">Error de sincronización</string>
+    <string name="flight_finished_title">Vuelo finalizado</string>
+    <string name="flight_uploading_message">Subiendo datos del vuelo…</string>
+    <string name="flight_sync_success_message">¡Vuelo sincronizado correctamente!</string>
+    <string name="flight_sync_summary">Vuelo de %1$d minutos, %2$d puntos registrados.</string>
+    <string name="flight_retry_button">Reintentar</string>
+    <string name="flight_close_button">Cerrar</string>
+    <string name="flight_my_position">Tu posición</string>
+    <string name="flight_start_button">Iniciar Vuelo</string>
+    <string name="flight_end_button">Finalizar Vuelo</string>
+    <string name="flight_pilot_snippet">Alt: %1$.0f ft - Vel: %2$.0f kt</string>
+    <string name="flight_server_error">Error del servidor: %1$d</string>
+    <string name="flight_connection_error">Error de conexión: %1$s</string>
+
+    <!-- Interrupted flight -->
+    <string name="flight_interrupted_title">Vuelo interrumpido</string>
+    <string name="flight_interrupted_message">Se encontró un vuelo sin finalizar (%1$d puntos registrados). ¿Subir ahora?</string>
+
+    <!-- FlightCard -->
+    <string name="flight_default_name">Vuelo</string>
+    <string name="flight_duration">Duración: %1$d min</string>
+
+    <!-- Notification (FlightTrackingService) -->
+    <string name="notification_channel_name">Canal de Seguimiento HAM</string>
+    <string name="notification_tracking_active">Seguimiento de vuelo activo</string>
+
+    <!-- StatsGrid -->
+    <string name="stats_altitude">Altitud (ft)</string>
+    <string name="stats_speed">Velocidad (kt)</string>
+    <string name="stats_heading">Rumbo (°)</string>
+    <string name="stats_elapsed">Tiempo</string>
 </resources>
