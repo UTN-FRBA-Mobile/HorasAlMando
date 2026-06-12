@@ -32,7 +32,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize API and Repo
         ApiClient.init(this)
         val authApi = ApiClient.createService(AuthApi::class.java)
         authRepository = AuthRepository(authApi, ApiClient.getSessionManager())
