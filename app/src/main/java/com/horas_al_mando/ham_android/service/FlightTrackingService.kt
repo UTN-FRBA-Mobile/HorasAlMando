@@ -122,6 +122,7 @@ class FlightTrackingService : Service() {
                 pressure = currentPressure
             )
             FlightRepository.updateFlight(point)
+            ActiveCircuitRepository.onLocation(point.lat, point.lng)
 
             serviceScope.launch {
                 AppDatabase.getInstance(applicationContext).inProgressFlightDao().insert(
@@ -158,6 +159,10 @@ class FlightTrackingService : Service() {
         }
         FlightRepository.setTracking(true)
         sessionManager.saveClientFlightId(FlightRepository.getClientFlightId())
+
+        if (ActiveCircuitRepository.activeCircuit.value != null) {
+            ActiveCircuitRepository.beginRun()
+        }
 
         serviceScope.launch {
             val existing = AppDatabase.getInstance(applicationContext).inProgressFlightDao().getAll()
