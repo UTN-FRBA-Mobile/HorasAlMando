@@ -25,6 +25,12 @@ import com.horas_al_mando.ham_android.network.CircuitRepository
 import com.horas_al_mando.ham_android.ui.CLEAN_MAP_STYLE_JSON
 import com.horas_al_mando.ham_android.ui.theme.*
 import kotlinx.coroutines.launch
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+
+private const val START_WAYPOINT_SNAP_RADIUS_METERS = 150.0
+private const val EARTH_RADIUS_METERS = 6_371_000.0
 
 @Composable
 fun CreateCircuitScreen(
@@ -44,6 +50,16 @@ fun CreateCircuitScreen(
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(-34.6037, -58.3816), 14f)
     }
+    val mapCenter = cameraPositionState.position.target
+    val startWaypoint = waypoints.firstOrNull()
+    val isSnappingToStart = startWaypoint != null &&
+        waypoints.size >= 2 &&
+        haversineMeters(
+            mapCenter.latitude,
+            mapCenter.longitude,
+            startWaypoint.lat,
+            startWaypoint.lng,
+        ) <= START_WAYPOINT_SNAP_RADIUS_METERS
 
     LaunchedEffect(Unit) {
         getLastLocation(context) { lat, lng ->
@@ -58,8 +74,22 @@ fun CreateCircuitScreen(
         waypoints.add(Waypoint(order = waypoints.size, lat = center.latitude, lng = center.longitude))
     }
 
-    fun finishWaypoints() {
+    fun addFinalWaypoint() {
+        val first = waypoints.firstOrNull()
+        if (first != null && waypoints.size >= 2) {
+            val center = cameraPositionState.position.target
+            val distanceToStart = haversineMeters(center.latitude, center.longitude, first.lat, first.lng)
+            if (distanceToStart <= START_WAYPOINT_SNAP_RADIUS_METERS) {
+                waypoints.add(Waypoint(order = waypoints.size, lat = first.lat, lng = first.lng))
+                return
+            }
+        }
+
         addWaypoint()
+    }
+
+    fun finishWaypoints() {
+        addFinalWaypoint()
         naming = true
         if (waypoints.size >= 2) {
             val builder = LatLngBounds.builder()
@@ -109,6 +139,7 @@ fun CreateCircuitScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
+                .imePadding()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Surface),
@@ -133,7 +164,17 @@ fun CreateCircuitScreen(
                             modifier = Modifier.weight(1f),
                             enabled = waypoints.isNotEmpty(),
                             colors = ButtonDefaults.buttonColors(containerColor = Primary),
-                        ) { Text(stringResource(R.string.create_circuit_final_waypoint)) }
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (isSnappingToStart) {
+                                        R.string.create_circuit_close_loop
+                                    } else {
+                                        R.string.create_circuit_final_waypoint
+                                    },
+                                ),
+                            )
+                        }
                     }
                 } else {
                     OutlinedTextField(
@@ -180,4 +221,14 @@ fun CreateCircuitScreen(
             }
         }
     }
+}
+
+private fun haversineMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLng = Math.toRadians(lng2 - lng1)
+    val a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+        sin(dLng / 2) * sin(dLng / 2)
+    val c = 2 * atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return EARTH_RADIUS_METERS * c
 }

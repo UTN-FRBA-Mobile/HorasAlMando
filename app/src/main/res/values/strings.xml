@@ -120,6 +120,7 @@
     <string name="create_circuit_title">Crear Circuito</string>
     <string name="create_circuit_add_waypoint">Agregar waypoint</string>
     <string name="create_circuit_final_waypoint">Waypoint final</string>
+    <string name="create_circuit_close_loop">Cerrar circuito</string>
     <string name="create_circuit_name_label">Nombre del circuito</string>
     <string name="create_circuit_confirm">Crear</string>
     <string name="create_circuit_cancel">Cancelar</string>
