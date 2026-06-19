@@ -21,14 +21,41 @@ object ApiClient {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
-    private val authInterceptor by lazy {
-        AuthInterceptor(sessionManager ?: throw IllegalStateException("ApiClient not initialized"))
+    private fun requireSession(): SessionManager =
+        sessionManager ?: throw IllegalStateException("ApiClient not initialized")
+
+    private val cookieJar by lazy { PersistentCookieJar(requireSession()) }
+
+    private val authInterceptor by lazy { AuthInterceptor(requireSession()) }
+
+    private val tokenRefreshInterceptor by lazy {
+        TokenRefreshInterceptor(requireSession()) { refreshApi }
+    }
+
+   private val refreshClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .cookieJar(cookieJar)
+            .addInterceptor(logging)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private val refreshApi: AuthApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .client(refreshClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(AuthApi::class.java)
     }
 
     val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(logging)
+            .cookieJar(cookieJar)
             .addInterceptor(authInterceptor)
+            .addInterceptor(tokenRefreshInterceptor)
+            .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()

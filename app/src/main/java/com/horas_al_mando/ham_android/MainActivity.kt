@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -53,6 +54,16 @@ fun HamApp(authRepository: AuthRepository, authViewModel: AuthViewModel) {
         authRepository.getUserId()?.toLongOrNull()?.let { FlightRepository.setPilotId(it) }
         "main"
     } else "login"
+
+    LaunchedEffect(Unit) {
+        SessionEvents.expired.collect {
+            ApiClient.getSessionManager().clearSession()
+            authViewModel.resetState()
+            rootNav.navigate("login") {
+                popUpTo(rootNav.graph.id) { inclusive = true }
+            }
+        }
+    }
 
     NavHost(navController = rootNav, startDestination = startDestination) {
         composable("login") {

@@ -29,6 +29,10 @@ data class AuthResponse(
     val active: Boolean?
 )
 
+data class RefreshResponse(
+    val token: String?
+)
+
 data class UserProfile(
     val id: String,
     val username: String,
