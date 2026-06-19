@@ -9,10 +9,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -27,18 +30,21 @@ import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.maps.android.compose.*
 import com.horas_al_mando.ham_android.R
 import com.horas_al_mando.ham_android.ui.CLEAN_MAP_STYLE_JSON
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.gson.Gson
 import com.horas_al_mando.ham_android.db.AppDatabase
 import com.horas_al_mando.ham_android.db.InProgressFlightPointEntity
 import com.horas_al_mando.ham_android.db.PendingFlightEntity
+import com.horas_al_mando.ham_android.hardware.CompassHelper
 import com.horas_al_mando.ham_android.model.FlightPoint
 import com.horas_al_mando.ham_android.model.FlightSyncPayload
 import com.horas_al_mando.ham_android.network.ApiClient
 import com.horas_al_mando.ham_android.network.FlightApiService
 import com.horas_al_mando.ham_android.network.SocialRadarRepository
+import com.horas_al_mando.ham_android.service.ActiveCircuitRepository
 import com.horas_al_mando.ham_android.service.FlightRepository
 import com.horas_al_mando.ham_android.service.FlightTrackingService
+import com.horas_al_mando.ham_android.service.RunUploadState
+import com.horas_al_mando.ham_android.ui.PlaneMarker
 import com.horas_al_mando.ham_android.ui.components.StatsGrid
 import com.horas_al_mando.ham_android.ui.theme.*
 import kotlinx.coroutines.launch
@@ -57,6 +63,19 @@ fun FlightScreen() {
     val elapsedSeconds by FlightRepository.elapsedSeconds.collectAsState(0L)
     val activePilots by SocialRadarRepository.activePilots.collectAsState()
 
+    val activeCircuit by ActiveCircuitRepository.activeCircuit.collectAsState()
+    val runInProgress by ActiveCircuitRepository.runInProgress.collectAsState()
+    val nextWaypointIndex by ActiveCircuitRepository.nextWaypointIndex.collectAsState()
+    val bearingToNext by ActiveCircuitRepository.bearingToNext.collectAsState()
+    val uploadState by ActiveCircuitRepository.uploadState.collectAsState()
+
+    var azimuth by remember { mutableFloatStateOf(0f) }
+    DisposableEffect(Unit) {
+        val compass = CompassHelper(context) { azimuth = it }
+        compass.start()
+        onDispose { compass.stop() }
+    }
+
     var showDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var uploadDone by remember { mutableStateOf(false) }
@@ -69,6 +88,7 @@ fun FlightScreen() {
     val serverErrorMsg = stringResource(R.string.flight_server_error)
     val connectionErrorMsg = stringResource(R.string.flight_connection_error)
     val pilotSnippetFormat = stringResource(R.string.flight_pilot_snippet)
+    val myPositionLabel = stringResource(R.string.flight_my_position)
 
     LaunchedEffect(Unit) {
         val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
@@ -151,7 +171,11 @@ fun FlightScreen() {
         )
     }
     val polylinePoints = remember(flightPoints.size) { flightPoints.map { LatLng(it.lat, it.lng) } }
-    val markerState = remember { MarkerState(position = START_LATLNG) }
+    val ownMarkerState = remember { MarkerState(position = START_LATLNG) }
+
+    val circuitPoints = remember(activeCircuit) {
+        activeCircuit?.waypoints?.sortedBy { it.order }?.map { LatLng(it.lat, it.lng) } ?: emptyList()
+    }
 
     var hasCenteredInitially by remember { mutableStateOf(false) }
 
@@ -163,7 +187,7 @@ fun FlightScreen() {
         currentPoint?.let {
             if (it.lat != 0.0 && it.lng != 0.0) {
                 val pos = LatLng(it.lat, it.lng)
-                markerState.position = pos
+                ownMarkerState.position = pos
                 if (isTracking) {
                     if (!hasCenteredInitially) {
                         cameraPositionState.position = CameraPosition.fromLatLngZoom(pos, 15f)
@@ -298,6 +322,40 @@ fun FlightScreen() {
         )
     }
 
+    uploadState?.let { state ->
+        AlertDialog(
+            onDismissRequest = {},
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(stringResource(R.string.flight_circuit_finished_title)) },
+            text = {
+                when (state) {
+                    is RunUploadState.Uploading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.flight_circuit_finished_uploading))
+                    }
+                    is RunUploadState.Success -> Text(
+                        stringResource(
+                            R.string.flight_circuit_finished_success,
+                            state.run.rank,
+                            formatDuration(state.run.totalDurationSeconds),
+                        )
+                    )
+                    is RunUploadState.Error -> Text(
+                        stringResource(R.string.flight_circuit_finished_error, state.message)
+                    )
+                }
+            },
+            confirmButton = {
+                if (state !is RunUploadState.Uploading) {
+                    TextButton(onClick = { ActiveCircuitRepository.acknowledgeResult() }) {
+                        Text(stringResource(R.string.flight_circuit_finished_close))
+                    }
+                }
+            },
+        )
+    }
+
     Box(Modifier.fillMaxSize()) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
@@ -313,10 +371,25 @@ fun FlightScreen() {
                     width = 5f,
                 )
             }
+
+            if (circuitPoints.isNotEmpty()) {
+                if (circuitPoints.size > 1) {
+                    Polyline(points = circuitPoints, color = Secondary, width = 5f)
+                }
+                activeCircuit?.waypoints?.sortedBy { it.order }?.forEach { wp ->
+                    Marker(
+                        state = MarkerState(position = LatLng(wp.lat, wp.lng)),
+                        title = "#${wp.order}",
+                    )
+                }
+            }
+
             if (currentPoint != null) {
-                Marker(
-                    state = markerState,
-                    title = stringResource(R.string.flight_my_position),
+                PlaneMarker(
+                    markerState = ownMarkerState,
+                    headingDegrees = (currentPoint.heading ?: 0.0).toFloat(),
+                    tint = Primary,
+                    title = myPositionLabel,
                 )
             }
 
@@ -328,11 +401,12 @@ fun FlightScreen() {
                     LaunchedEffect(pilot.lat, pilot.lng) {
                         pilotMarkerState.position = LatLng(pilot.lat, pilot.lng)
                     }
-                    Marker(
-                        state = pilotMarkerState,
+                    PlaneMarker(
+                        markerState = pilotMarkerState,
+                        headingDegrees = pilot.heading.toFloat(),
+                        tint = GradientBlue,
                         title = pilot.name,
                         snippet = pilotSnippetFormat.format(pilot.altitude, pilot.speed),
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                     )
                 }
             }
@@ -353,6 +427,22 @@ fun FlightScreen() {
                 Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (activeCircuit != null) {
+                    CircuitRunPanel(
+                        circuitName = activeCircuit!!.name,
+                        timer = formatElapsed(elapsedSeconds),
+                        nextWaypointNumber = circuitPoints.indices.contains(nextWaypointIndex).let {
+                            if (it && runInProgress) nextWaypointIndex else -1
+                        },
+                        nextWaypointLat = activeCircuit!!.waypoints.getOrNull(nextWaypointIndex)?.lat,
+                        nextWaypointLng = activeCircuit!!.waypoints.getOrNull(nextWaypointIndex)?.lng,
+                        arrowRotation = ((bearingToNext ?: 0f) - azimuth),
+                        showProgress = runInProgress,
+                        onCancel = { ActiveCircuitRepository.disarm() },
+                    )
+                    HorizontalDivider(color = Outline)
+                }
+
                 StatsGrid(
                     altitude = currentPoint?.altitude?.let { "%.0f".format(it) } ?: "--",
                     speed = currentPoint?.speed?.let { "%.0f".format(it) } ?: "--",
@@ -402,9 +492,55 @@ fun FlightScreen() {
     }
 }
 
+@Composable
+private fun CircuitRunPanel(
+    circuitName: String,
+    timer: String,
+    nextWaypointNumber: Int,
+    nextWaypointLat: Double?,
+    nextWaypointLng: Double?,
+    arrowRotation: Float,
+    showProgress: Boolean,
+    onCancel: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(circuitName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.flight_circuit_timer, timer))
+            if (showProgress && nextWaypointNumber >= 0) {
+                Text(stringResource(R.string.flight_circuit_next_waypoint, nextWaypointNumber))
+                if (nextWaypointLat != null && nextWaypointLng != null) {
+                    Text(
+                        stringResource(R.string.flight_circuit_coords, nextWaypointLat, nextWaypointLng),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Secondary,
+                    )
+                }
+            }
+            TextButton(onClick = onCancel, contentPadding = PaddingValues(0.dp)) {
+                Text(stringResource(R.string.flight_circuit_cancel_run), color = Destructive)
+            }
+        }
+        if (showProgress) {
+            Icon(
+                imageVector = Icons.Default.Navigation,
+                contentDescription = null,
+                tint = Primary,
+                modifier = Modifier.size(56.dp).rotate(arrowRotation),
+            )
+        }
+    }
+}
+
 private fun formatElapsed(seconds: Long): String {
     val h = seconds / 3600
     val m = (seconds % 3600) / 60
     val s = seconds % 60
     return "%02d:%02d:%02d".format(h, m, s)
+}
+
+private fun formatDuration(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return "%02d:%02d".format(m, s)
 }

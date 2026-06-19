@@ -14,6 +14,9 @@ interface AuthApi {
     @POST("auth/login")
     suspend fun login(@Body request: LoginRequest): Response<AuthResponse>
 
+    @POST("auth/refresh")
+    fun refresh(): retrofit2.Call<RefreshResponse>
+
     @POST("auth/logout")
     suspend fun logout(): Response<Unit>
 

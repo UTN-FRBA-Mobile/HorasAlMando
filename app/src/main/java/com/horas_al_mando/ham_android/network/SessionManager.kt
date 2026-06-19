@@ -22,6 +22,10 @@ class SessionManager(context: Context) {
         private const val KEY_TOKEN = "jwt_token"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_CLIENT_FLIGHT_ID = "client_flight_id"
+
+        const val REFRESH_TOKEN_ID_COOKIE = "ham_refresh_token_id"
+        const val REFRESH_TOKEN_COOKIE = "ham_refresh_token"
+        private const val COOKIE_PREFIX = "cookie_"
     }
 
     fun saveAuthToken(token: String) {
@@ -30,6 +34,23 @@ class SessionManager(context: Context) {
 
     fun getAuthToken(): String? {
         return prefs.getString(KEY_TOKEN, null)
+    }
+
+    fun saveRefreshCookie(name: String, value: String) {
+        prefs.edit().putString(COOKIE_PREFIX + name, value).apply()
+    }
+
+    fun getRefreshCookie(name: String): String? {
+        return prefs.getString(COOKIE_PREFIX + name, null)
+    }
+
+    fun removeRefreshCookie(name: String) {
+        prefs.edit().remove(COOKIE_PREFIX + name).apply()
+    }
+
+    fun hasRefreshCookies(): Boolean {
+        return getRefreshCookie(REFRESH_TOKEN_ID_COOKIE) != null &&
+            getRefreshCookie(REFRESH_TOKEN_COOKIE) != null
     }
 
     fun saveUserId(userId: String) {

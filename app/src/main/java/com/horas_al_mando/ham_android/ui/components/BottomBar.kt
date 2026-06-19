@@ -4,18 +4,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 sealed class BottomTab(val route: String, val label: String, val icon: ImageVector) {
-    object Flight  : BottomTab("flight",  "Vuelo",     Icons.Default.Flight)
-    object History : BottomTab("history", "Historial", Icons.Default.History)
-    object Profile : BottomTab("profile", "Perfil",    Icons.Default.Person)
+    object Flight   : BottomTab("flight",   "Vuelo",     Icons.Default.Flight)
+    object Circuits : BottomTab("circuits", "Circuitos", Icons.Default.Route)
+    object History  : BottomTab("history",  "Historial", Icons.Default.History)
+    object Profile  : BottomTab("profile",  "Perfil",    Icons.Default.Person)
 }
 
-private val tabs = listOf(BottomTab.Flight, BottomTab.History, BottomTab.Profile)
+private val tabs = listOf(BottomTab.Flight, BottomTab.Circuits, BottomTab.History, BottomTab.Profile)
 
 @Composable
 fun HamBottomBar(currentRoute: String?, onNavigate: (String) -> Unit) {
