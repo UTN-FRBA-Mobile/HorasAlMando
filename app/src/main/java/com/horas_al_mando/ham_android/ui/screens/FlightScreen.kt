@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
@@ -39,6 +40,7 @@ import com.horas_al_mando.ham_android.model.FlightPoint
 import com.horas_al_mando.ham_android.model.FlightSyncPayload
 import com.horas_al_mando.ham_android.network.ApiClient
 import com.horas_al_mando.ham_android.network.FlightApiService
+import com.horas_al_mando.ham_android.network.FlightTrackRepository
 import com.horas_al_mando.ham_android.network.SocialRadarRepository
 import com.horas_al_mando.ham_android.service.ActiveCircuitRepository
 import com.horas_al_mando.ham_android.service.FlightRepository
@@ -49,6 +51,7 @@ import com.horas_al_mando.ham_android.ui.components.StatsGrid
 import com.horas_al_mando.ham_android.ui.theme.*
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 private val START_LATLNG = LatLng(-34.6037, -58.3816)
 private val gson = Gson()
@@ -68,6 +71,7 @@ fun FlightScreen() {
     val nextWaypointIndex by ActiveCircuitRepository.nextWaypointIndex.collectAsState()
     val bearingToNext by ActiveCircuitRepository.bearingToNext.collectAsState()
     val uploadState by ActiveCircuitRepository.uploadState.collectAsState()
+    val activeGhostRun by ActiveCircuitRepository.ghostRun.collectAsState()
 
     var azimuth by remember { mutableFloatStateOf(0f) }
     DisposableEffect(Unit) {
@@ -84,11 +88,68 @@ fun FlightScreen() {
     var showPendingDialog by remember { mutableStateOf(false) }
     var showInterruptedDialog by remember { mutableStateOf(false) }
     var interruptedPoints by remember { mutableStateOf<List<InProgressFlightPointEntity>>(emptyList()) }
+    var ghostEnabled by remember { mutableStateOf(false) }
+    val flightTrackRepository = remember { FlightTrackRepository(FlightApiService.api) }
+    var ghostTrack by remember { mutableStateOf<GhostTrack?>(null) }
+    var ghostLoading by remember { mutableStateOf(false) }
+    var ghostMessage by remember { mutableStateOf<String?>(null) }
 
     val serverErrorMsg = stringResource(R.string.flight_server_error)
     val connectionErrorMsg = stringResource(R.string.flight_connection_error)
     val pilotSnippetFormat = stringResource(R.string.flight_pilot_snippet)
     val myPositionLabel = stringResource(R.string.flight_my_position)
+    val defaultFlightName = stringResource(R.string.flight_default_name)
+    val ghostEmptyMsg = stringResource(R.string.flight_ghost_empty)
+    val ghostErrorMsg = stringResource(R.string.flight_ghost_error)
+    val ghostSnippetFormat = stringResource(R.string.flight_ghost_snippet)
+
+    LaunchedEffect(activeGhostRun) {
+        val run = activeGhostRun
+        if (run == null) {
+            ghostTrack = null
+            ghostLoading = false
+            ghostMessage = null
+            return@LaunchedEffect
+        }
+
+        ghostLoading = true
+        ghostMessage = null
+        flightTrackRepository.getGhostTrack(run.id)
+            .onSuccess { detail ->
+                val trackPoints = detail.actualPath
+                if (trackPoints.isEmpty()) {
+                    ghostMessage = ghostEmptyMsg
+                    ghostTrack = null
+                } else {
+                    ghostTrack = GhostTrack(
+                        name = run.pilotName,
+                        durationMinutes = run.totalDurationSeconds / 60,
+                        path = trackPoints,
+                    )
+                }
+            }
+            .onFailure {
+                // Fallback to simulation using waypoint times
+                ghostTrack = GhostTrack(
+                    name = run.pilotName,
+                    durationMinutes = run.totalDurationSeconds / 60,
+                    path = run.waypointTimes.map { wp ->
+                        FlightPoint(
+                            lat = wp.lat,
+                            lng = wp.lng,
+                            timestamp = Instant.ofEpochSecond(wp.elapsedSeconds.toLong()).toString(),
+                            altitude = 0.0,
+                            speed = 0.0,
+                            heading = 0.0,
+                            verticalSpeed = 0.0,
+                            pressure = 0.0
+                        )
+                    }
+                )
+                ghostMessage = null
+            }
+        ghostLoading = false
+    }
 
     LaunchedEffect(Unit) {
         val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
@@ -157,6 +218,9 @@ fun FlightScreen() {
     }
 
     val currentPoint = flightPoints.lastOrNull()
+    val ghostSnapshot = remember(ghostEnabled, isTracking, ghostTrack, elapsedSeconds) {
+        if (ghostEnabled && isTracking) ghostTrack?.snapshotAt(elapsedSeconds) else null
+    }
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(START_LATLNG, 13f)
     }
@@ -172,6 +236,8 @@ fun FlightScreen() {
     }
     val polylinePoints = remember(flightPoints.size) { flightPoints.map { LatLng(it.lat, it.lng) } }
     val ownMarkerState = remember { MarkerState(position = START_LATLNG) }
+    val ghostPolylinePoints = remember(ghostTrack) { ghostTrack?.path?.map { LatLng(it.lat, it.lng) }.orEmpty() }
+    val ghostMarkerState = remember { MarkerState(position = START_LATLNG) }
 
     val circuitPoints = remember(activeCircuit) {
         activeCircuit?.waypoints?.sortedBy { it.order }?.map { LatLng(it.lat, it.lng) } ?: emptyList()
@@ -197,6 +263,12 @@ fun FlightScreen() {
                     }
                 }
             }
+        }
+    }
+
+    LaunchedEffect(ghostSnapshot?.point) {
+        ghostSnapshot?.point?.let {
+            ghostMarkerState.position = LatLng(it.lat, it.lng)
         }
     }
 
@@ -384,12 +456,27 @@ fun FlightScreen() {
                 }
             }
 
+            if (ghostEnabled && ghostPolylinePoints.size > 1) {
+                Polyline(
+                    points = ghostPolylinePoints,
+                    color = Warning,
+                    width = 4f,
+                )
+            }
             if (currentPoint != null) {
                 PlaneMarker(
                     markerState = ownMarkerState,
                     headingDegrees = (currentPoint.heading ?: 0.0).toFloat(),
                     tint = Primary,
                     title = myPositionLabel,
+                )
+            }
+            if (ghostSnapshot != null) {
+                Marker(
+                    state = ghostMarkerState,
+                    title = stringResource(R.string.flight_ghost_marker),
+                    snippet = ghostSnippetFormat.format(formatElapsed(ghostSnapshot.elapsedSeconds)),
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
                 )
             }
 
@@ -449,6 +536,16 @@ fun FlightScreen() {
                     heading = currentPoint?.heading?.let { "%.0f".format(it) } ?: "--",
                     elapsed = formatElapsed(elapsedSeconds),
                 )
+
+                if (activeGhostRun != null) {
+                    GhostModeRow(
+                        enabled = ghostEnabled,
+                        onEnabledChange = { ghostEnabled = it },
+                        ghostTrack = ghostTrack,
+                        isLoading = ghostLoading,
+                        message = ghostMessage,
+                    )
+                }
 
                 if (!isTracking) {
                     Button(
@@ -529,6 +626,105 @@ private fun CircuitRunPanel(
                 modifier = Modifier.size(56.dp).rotate(arrowRotation),
             )
         }
+    }
+}
+
+private data class GhostTrack(
+    val name: String,
+    val durationMinutes: Int,
+    val path: List<FlightPoint>,
+)
+
+private data class GhostSnapshot(
+    val point: FlightPoint,
+    val elapsedSeconds: Long,
+)
+
+private fun GhostTrack.snapshotAt(elapsedSeconds: Long): GhostSnapshot? {
+    if (path.isEmpty()) return null
+
+    val start = runCatching { Instant.parse(path.first().timestamp) }.getOrNull() ?: return null
+    val target = start.plusSeconds(elapsedSeconds)
+    val first = path.first()
+
+    if (path.size == 1 || elapsedSeconds <= 0) {
+        return GhostSnapshot(first, 0)
+    }
+
+    val nextIndex = path.indexOfFirst { point ->
+        runCatching { !Instant.parse(point.timestamp).isBefore(target) }.getOrDefault(false)
+    }
+
+    if (nextIndex <= 0) {
+        return GhostSnapshot(first, 0)
+    }
+
+    if (nextIndex == -1) {
+        val last = path.last()
+        val lastElapsed = ChronoUnit.SECONDS.between(start, Instant.parse(last.timestamp)).coerceAtLeast(0)
+        return GhostSnapshot(last, lastElapsed)
+    }
+
+    val previous = path[nextIndex - 1]
+    val next = path[nextIndex]
+    val previousInstant = Instant.parse(previous.timestamp)
+    val nextInstant = Instant.parse(next.timestamp)
+    val segmentMillis = ChronoUnit.MILLIS.between(previousInstant, nextInstant).coerceAtLeast(1)
+    val targetMillis = ChronoUnit.MILLIS.between(previousInstant, target).coerceIn(0, segmentMillis)
+    val ratio = targetMillis.toDouble() / segmentMillis.toDouble()
+
+    return GhostSnapshot(
+        point = previous.interpolateTo(next, ratio, target.toString()),
+        elapsedSeconds = ChronoUnit.SECONDS.between(start, target).coerceAtLeast(0),
+    )
+}
+
+private fun FlightPoint.interpolateTo(next: FlightPoint, ratio: Double, timestamp: String): FlightPoint =
+    FlightPoint(
+        lat = lat + (next.lat - lat) * ratio,
+        lng = lng + (next.lng - lng) * ratio,
+        timestamp = timestamp,
+        altitude = altitude + (next.altitude - altitude) * ratio,
+        speed = speed + (next.speed - speed) * ratio,
+        heading = heading + (next.heading - heading) * ratio,
+        verticalSpeed = verticalSpeed + (next.verticalSpeed - verticalSpeed) * ratio,
+        pressure = pressure + (next.pressure - pressure) * ratio,
+    )
+
+@Composable
+private fun GhostModeRow(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    ghostTrack: GhostTrack?,
+    isLoading: Boolean,
+    message: String?,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.flight_ghost_mode),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = when {
+                    isLoading -> stringResource(R.string.flight_ghost_loading)
+                    message != null -> message
+                    ghostTrack != null -> "${stringResource(R.string.flight_ghost_record)}: ${ghostTrack.name} (${ghostTrack.durationMinutes} min)"
+                    else -> stringResource(R.string.flight_ghost_record)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = Secondary,
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+        )
     }
 }
 

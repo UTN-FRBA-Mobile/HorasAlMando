@@ -32,6 +32,9 @@ object ActiveCircuitRepository {
     private val _activeCircuit = MutableStateFlow<CircuitDetail?>(null)
     val activeCircuit: StateFlow<CircuitDetail?> = _activeCircuit.asStateFlow()
 
+    private val _ghostRun = MutableStateFlow<CircuitRun?>(null)
+    val ghostRun: StateFlow<CircuitRun?> = _ghostRun.asStateFlow()
+
     private val _runInProgress = MutableStateFlow(false)
     val runInProgress: StateFlow<Boolean> = _runInProgress.asStateFlow()
 
@@ -50,6 +53,10 @@ object ActiveCircuitRepository {
 
     private var toneGenerator: ToneGenerator? = null
 
+    fun setGhostRun(run: CircuitRun?) {
+        _ghostRun.value = run
+    }
+
     fun arm(circuit: CircuitDetail) {
         _activeCircuit.value = circuit
         _runInProgress.value = false
@@ -61,6 +68,7 @@ object ActiveCircuitRepository {
 
     fun disarm() {
         _activeCircuit.value = null
+        _ghostRun.value = null
         _runInProgress.value = false
         _nextWaypointIndex.value = 0
         _bearingToNext.value = null
@@ -124,6 +132,7 @@ object ActiveCircuitRepository {
     fun acknowledgeResult() {
         _uploadState.value = null
         _activeCircuit.value = null
+        _ghostRun.value = null
         _nextWaypointIndex.value = 0
         _bearingToNext.value = null
         arrivals.clear()

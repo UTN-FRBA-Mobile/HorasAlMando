@@ -18,6 +18,9 @@ interface FlightApi {
 
     @GET("flight-tracks/{id}")
     suspend fun getFlightTrackDetail(@Path("id") id: Long): Response<FlightTrackDetail>
+
+    @GET("flight-tracks/ghost-track/{circuitRunId}")
+    suspend fun getGhostTrack(@Path("circuitRunId") circuitRunId: Long): Response<FlightTrackDetail>
 }
 
 

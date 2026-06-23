@@ -13,4 +13,9 @@ class FlightTrackRepository(private val api: FlightApi) {
         api.getFlightTrackDetail(id).body()
             ?: error("FlightTrack $id not found")
     }
+
+    suspend fun getGhostTrack(circuitRunId: Long): Result<FlightTrackDetail> = runCatching {
+        api.getGhostTrack(circuitRunId).body()
+            ?: error("Ghost track for run $circuitRunId not found")
+    }
 }

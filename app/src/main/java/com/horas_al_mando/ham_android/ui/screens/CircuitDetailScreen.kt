@@ -1,6 +1,7 @@
 package com.horas_al_mando.ham_android.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +29,8 @@ import com.horas_al_mando.ham_android.network.CircuitRepository
 import com.horas_al_mando.ham_android.service.ActiveCircuitRepository
 import com.horas_al_mando.ham_android.ui.CLEAN_MAP_STYLE_JSON
 import com.horas_al_mando.ham_android.ui.theme.*
+import com.horas_al_mando.ham_android.network.FlightTrackRepository
+import com.horas_al_mando.ham_android.network.FlightApiService
 import kotlinx.coroutines.launch
 
 @Composable
@@ -46,11 +49,39 @@ fun CircuitDetailScreen(
     var showRunConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    val activeGhostRun by ActiveCircuitRepository.ghostRun.collectAsState()
+    var ghostPoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+
+    LaunchedEffect(activeGhostRun) {
+        val run = activeGhostRun
+        if (run == null) {
+            ghostPoints = emptyList()
+            return@LaunchedEffect
+        }
+        val trackRepository = FlightTrackRepository(FlightApiService.api)
+        trackRepository.getGhostTrack(run.id)
+            .onSuccess { detail ->
+                ghostPoints = detail.actualPath.map { LatLng(it.lat, it.lng) }
+            }
+            .onFailure {
+                ghostPoints = run.waypointTimes.sortedBy { it.order }.map { LatLng(it.lat, it.lng) }
+            }
+    }
+
     LaunchedEffect(circuitId) {
         scope.launch {
             repository.getCircuit(circuitId).onSuccess { detail = it }
             repository.getRuns(circuitId).onSuccess { runs = it }
             isLoading = false
+        }
+    }
+
+    LaunchedEffect(runs, activeGhostRun, isLoading) {
+        if (!isLoading) {
+            val ghost = activeGhostRun
+            if (ghost != null && runs.none { it.id == ghost.id }) {
+                ActiveCircuitRepository.setGhostRun(null)
+            }
         }
     }
 
@@ -137,6 +168,9 @@ fun CircuitDetailScreen(
                     if (points.size > 1) {
                         Polyline(points = points, color = Primary, width = 6f)
                     }
+                    if (ghostPoints.isNotEmpty()) {
+                        Polyline(points = ghostPoints, color = Warning, width = 5f)
+                    }
                     circuit.waypoints.sortedBy { it.order }.forEach { wp ->
                         Marker(
                             state = MarkerState(position = LatLng(wp.lat, wp.lng)),
@@ -212,15 +246,56 @@ fun CircuitDetailScreen(
                             )
                         } else {
                             runs.forEach { run ->
-                                Text(
-                                    stringResource(
-                                        R.string.circuit_detail_run_row,
-                                        run.rank,
-                                        run.pilotName,
-                                        formatDuration(run.totalDurationSeconds),
-                                    ),
-                                    modifier = Modifier.padding(vertical = 6.dp),
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (activeGhostRun?.id == run.id) {
+                                                ActiveCircuitRepository.setGhostRun(null)
+                                            } else {
+                                                ActiveCircuitRepository.setGhostRun(run)
+                                            }
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    RadioButton(
+                                        selected = (activeGhostRun?.id == run.id),
+                                        onClick = {
+                                            if (activeGhostRun?.id == run.id) {
+                                                ActiveCircuitRepository.setGhostRun(null)
+                                            } else {
+                                                ActiveCircuitRepository.setGhostRun(run)
+                                            }
+                                        },
+                                        colors = RadioButtonDefaults.colors(
+                                            selectedColor = Primary,
+                                            unselectedColor = Secondary
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stringResource(
+                                                R.string.circuit_detail_run_row,
+                                                run.rank,
+                                                run.pilotName,
+                                                formatDuration(run.totalDurationSeconds),
+                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (activeGhostRun?.id == run.id) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (activeGhostRun?.id == run.id) Primary else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        if (activeGhostRun?.id == run.id) {
+                                            Text(
+                                                text = "Ghost seleccionado",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Primary,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
                                 HorizontalDivider(color = Outline)
                             }
                         }

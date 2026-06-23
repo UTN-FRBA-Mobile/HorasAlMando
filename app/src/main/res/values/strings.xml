@@ -66,6 +66,13 @@
     <string name="flight_pilot_snippet">Alt: %1$.0f ft - Vel: %2$.0f kt</string>
     <string name="flight_server_error">Error del servidor: %1$d</string>
     <string name="flight_connection_error">Error de conexión: %1$s</string>
+    <string name="flight_ghost_mode">Modo Ghost</string>
+    <string name="flight_ghost_record">Récord personal</string>
+    <string name="flight_ghost_loading">Cargando fantasma...</string>
+    <string name="flight_ghost_empty">No hay vuelos previos para competir.</string>
+    <string name="flight_ghost_error">No se pudo cargar el fantasma.</string>
+    <string name="flight_ghost_marker">Fantasma</string>
+    <string name="flight_ghost_snippet">Tiempo: %1$s</string>
 
     <!-- Interrupted flight -->
     <string name="flight_interrupted_title">Vuelo interrumpido</string>

@@ -60,7 +60,7 @@ fun ReplayScreen(
     }
 
     val track = detail!!
-    val path = track.path
+    val path = track.actualPath
     val defaultFlightName = stringResource(R.string.flight_default_name)
 
     var sliderPos by remember { mutableFloatStateOf(0f) }

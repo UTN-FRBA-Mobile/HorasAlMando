@@ -6,5 +6,9 @@ data class FlightTrackDetail(
     val endTime             : String,
     val totalDurationMinutes: Int,
     val locationName        : String?,
-    val path                : List<FlightPoint>,
-)
+    val path                : List<FlightPoint>? = null,
+    val points              : List<FlightPoint>? = null,
+) {
+    val actualPath: List<FlightPoint>
+        get() = path ?: points ?: emptyList()
+}
