@@ -491,7 +491,7 @@ fun FlightScreen() {
                     PlaneMarker(
                         markerState = pilotMarkerState,
                         headingDegrees = pilot.heading.toFloat(),
-                        tint = GradientBlue,
+                        tint = PilotOrange,
                         title = pilot.name,
                         snippet = pilotSnippetFormat.format(pilot.altitude, pilot.speed),
                     )
