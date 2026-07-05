@@ -91,7 +91,7 @@ fun CircuitsScreen(
                     value = rangeKm,
                     onValueChange = { rangeKm = it },
                     onValueChangeFinished = { reload() },
-                    valueRange = 10f..1000f,
+                    valueRange = 1f..200f,
                     colors = SliderDefaults.colors(thumbColor = Primary, activeTrackColor = Primary),
                 )
             }

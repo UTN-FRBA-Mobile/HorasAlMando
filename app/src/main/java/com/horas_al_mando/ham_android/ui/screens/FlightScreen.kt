@@ -24,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
@@ -459,7 +458,7 @@ fun FlightScreen() {
             if (ghostEnabled && ghostPolylinePoints.size > 1) {
                 Polyline(
                     points = ghostPolylinePoints,
-                    color = Warning,
+                    color = GhostGreen,
                     width = 4f,
                 )
             }
@@ -472,11 +471,12 @@ fun FlightScreen() {
                 )
             }
             if (ghostSnapshot != null) {
-                Marker(
-                    state = ghostMarkerState,
+                PlaneMarker(
+                    markerState = ghostMarkerState,
+                    headingDegrees = ghostSnapshot.point.heading.toFloat(),
+                    tint = GhostGreen,
                     title = stringResource(R.string.flight_ghost_marker),
                     snippet = ghostSnippetFormat.format(formatElapsed(ghostSnapshot.elapsedSeconds)),
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
                 )
             }
 

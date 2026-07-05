@@ -4,7 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -122,7 +122,7 @@ fun CreateCircuitScreen(
 
         if (!naming) {
             Icon(
-                imageVector = Icons.Default.Place,
+                imageVector = Icons.Default.GpsFixed,
                 contentDescription = null,
                 tint = Destructive,
                 modifier = Modifier.align(Alignment.Center).size(48.dp),
