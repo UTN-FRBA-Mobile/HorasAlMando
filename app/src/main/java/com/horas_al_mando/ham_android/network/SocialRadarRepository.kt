@@ -52,9 +52,10 @@ object SocialRadarRepository {
     }
 
     private fun openSocket() {
-        val token = ApiClient.getSessionManager().getAuthToken()
+        // Authorization is injected by AuthInterceptor (on ApiClient.okHttpClient) for non-/auth/
+        // paths. Adding it here too would send two Authorization headers, which Cloudflare rejects
+        // with 400 on the WS handshake (works locally direct-to-Spring, fails in prod behind CDN).
         val builder = Request.Builder().url(WS_URL)
-        if (token != null) builder.addHeader("Authorization", "Bearer $token")
         val listener = RadarSocketListener(
             onPilots = { _activePilots.value = it },
             onOpen = { connected = true; reconnectAttempts = 0 },
