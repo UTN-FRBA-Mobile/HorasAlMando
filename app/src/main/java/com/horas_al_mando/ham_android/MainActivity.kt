@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -52,6 +54,16 @@ fun HamApp(authRepository: AuthRepository, authViewModel: AuthViewModel) {
         authRepository.getUserId()?.toLongOrNull()?.let { FlightRepository.setPilotId(it) }
         "main"
     } else "login"
+
+    LaunchedEffect(Unit) {
+        SessionEvents.expired.collect {
+            ApiClient.getSessionManager().clearSession()
+            authViewModel.resetState()
+            rootNav.navigate("login") {
+                popUpTo(rootNav.graph.id) { inclusive = true }
+            }
+        }
+    }
 
     NavHost(navController = rootNav, startDestination = startDestination) {
         composable("login") {
@@ -120,7 +132,9 @@ fun MainScreen(
     val currentRoute = backStack?.destination?.route
 
     val isTracking by FlightRepository.isTracking.collectAsState()
-    val showBottomBar = currentRoute?.startsWith("replay") == false && !isTracking
+    val circuitRepository = remember { CircuitRepository() }
+    val mainRoutes = setOf("flight", "circuits", "history", "profile")
+    val showBottomBar = currentRoute in mainRoutes && !isTracking
 
     Scaffold(
         bottomBar = {
@@ -147,6 +161,35 @@ fun MainScreen(
         ) {
             composable("flight") {
                 FlightScreen()
+            }
+            composable("circuits") {
+                CircuitsScreen(
+                    repository   = circuitRepository,
+                    onOpenDetail = { id -> innerNav.navigate("circuitDetail/$id") },
+                    onCreate     = { innerNav.navigate("createCircuit") },
+                )
+            }
+            composable("circuitDetail/{id}") { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: 0L
+                CircuitDetailScreen(
+                    circuitId  = id,
+                    repository = circuitRepository,
+                    onBack     = { innerNav.popBackStack() },
+                    onRecorrer = {
+                        innerNav.navigate("flight") {
+                            popUpTo("circuits")
+                            launchSingleTop = true
+                        }
+                    },
+                    onDeleted  = { innerNav.popBackStack() },
+                )
+            }
+            composable("createCircuit") {
+                CreateCircuitScreen(
+                    repository = circuitRepository,
+                    onBack     = { innerNav.popBackStack() },
+                    onCreated  = { innerNav.popBackStack() },
+                )
             }
             composable("history") {
                 HistoryScreen(

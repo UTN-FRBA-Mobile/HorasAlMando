@@ -21,6 +21,11 @@ class SessionManager(context: Context) {
     companion object {
         private const val KEY_TOKEN = "jwt_token"
         private const val KEY_USER_ID = "user_id"
+        private const val KEY_CLIENT_FLIGHT_ID = "client_flight_id"
+
+        const val REFRESH_TOKEN_ID_COOKIE = "ham_refresh_token_id"
+        const val REFRESH_TOKEN_COOKIE = "ham_refresh_token"
+        private const val COOKIE_PREFIX = "cookie_"
     }
 
     fun saveAuthToken(token: String) {
@@ -31,12 +36,41 @@ class SessionManager(context: Context) {
         return prefs.getString(KEY_TOKEN, null)
     }
 
+    fun saveRefreshCookie(name: String, value: String) {
+        prefs.edit().putString(COOKIE_PREFIX + name, value).apply()
+    }
+
+    fun getRefreshCookie(name: String): String? {
+        return prefs.getString(COOKIE_PREFIX + name, null)
+    }
+
+    fun removeRefreshCookie(name: String) {
+        prefs.edit().remove(COOKIE_PREFIX + name).apply()
+    }
+
+    fun hasRefreshCookies(): Boolean {
+        return getRefreshCookie(REFRESH_TOKEN_ID_COOKIE) != null &&
+            getRefreshCookie(REFRESH_TOKEN_COOKIE) != null
+    }
+
     fun saveUserId(userId: String) {
         prefs.edit().putString(KEY_USER_ID, userId).apply()
     }
 
     fun getUserId(): String? {
         return prefs.getString(KEY_USER_ID, null)
+    }
+
+    fun saveClientFlightId(id: String) {
+        prefs.edit().putString(KEY_CLIENT_FLIGHT_ID, id).apply()
+    }
+
+    fun getClientFlightId(): String? {
+        return prefs.getString(KEY_CLIENT_FLIGHT_ID, null)
+    }
+
+    fun clearClientFlightId() {
+        prefs.edit().remove(KEY_CLIENT_FLIGHT_ID).apply()
     }
 
     fun clearSession() {

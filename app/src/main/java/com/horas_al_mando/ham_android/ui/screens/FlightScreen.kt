@@ -9,36 +9,49 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.maps.android.compose.*
 import com.horas_al_mando.ham_android.R
 import com.horas_al_mando.ham_android.ui.CLEAN_MAP_STYLE_JSON
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.gson.Gson
 import com.horas_al_mando.ham_android.db.AppDatabase
 import com.horas_al_mando.ham_android.db.InProgressFlightPointEntity
 import com.horas_al_mando.ham_android.db.PendingFlightEntity
+import com.horas_al_mando.ham_android.hardware.CompassHelper
 import com.horas_al_mando.ham_android.model.FlightPoint
 import com.horas_al_mando.ham_android.model.FlightSyncPayload
+import com.horas_al_mando.ham_android.network.ApiClient
 import com.horas_al_mando.ham_android.network.FlightApiService
+import com.horas_al_mando.ham_android.network.FlightTrackRepository
 import com.horas_al_mando.ham_android.network.SocialRadarRepository
+import com.horas_al_mando.ham_android.service.ActiveCircuitRepository
 import com.horas_al_mando.ham_android.service.FlightRepository
 import com.horas_al_mando.ham_android.service.FlightTrackingService
+import com.horas_al_mando.ham_android.service.RunUploadState
+import com.horas_al_mando.ham_android.ui.PlaneMarker
 import com.horas_al_mando.ham_android.ui.components.StatsGrid
 import com.horas_al_mando.ham_android.ui.theme.*
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 private val START_LATLNG = LatLng(-34.6037, -58.3816)
 private val gson = Gson()
@@ -53,26 +66,91 @@ fun FlightScreen() {
     val elapsedSeconds by FlightRepository.elapsedSeconds.collectAsState(0L)
     val activePilots by SocialRadarRepository.activePilots.collectAsState()
 
+    val activeCircuit by ActiveCircuitRepository.activeCircuit.collectAsState()
+    val runInProgress by ActiveCircuitRepository.runInProgress.collectAsState()
+    val nextWaypointIndex by ActiveCircuitRepository.nextWaypointIndex.collectAsState()
+    val bearingToNext by ActiveCircuitRepository.bearingToNext.collectAsState()
+    val uploadState by ActiveCircuitRepository.uploadState.collectAsState()
+    val activeGhostRun by ActiveCircuitRepository.ghostRun.collectAsState()
+
+    var azimuth by remember { mutableFloatStateOf(0f) }
     DisposableEffect(Unit) {
-        // TODO: Enable when backend WebSocket /ws/radar is implemented
-        // SocialRadarRepository.connect()
-        onDispose {
-            SocialRadarRepository.disconnect()
-        }
+        val compass = CompassHelper(context) { azimuth = it }
+        compass.start()
+        onDispose { compass.stop() }
     }
 
     var showDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var uploadDone by remember { mutableStateOf(false) }
     var syncError by remember { mutableStateOf<String?>(null) }
+    var isOffline by remember { mutableStateOf(false) }
     var pendingPayload by remember { mutableStateOf<FlightSyncPayload?>(null) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var showInterruptedDialog by remember { mutableStateOf(false) }
     var interruptedPoints by remember { mutableStateOf<List<InProgressFlightPointEntity>>(emptyList()) }
+    var ghostEnabled by remember { mutableStateOf(false) }
+    val flightTrackRepository = remember { FlightTrackRepository(FlightApiService.api) }
+    var ghostTrack by remember { mutableStateOf<GhostTrack?>(null) }
+    var ghostLoading by remember { mutableStateOf(false) }
+    var ghostMessage by remember { mutableStateOf<String?>(null) }
 
     val serverErrorMsg = stringResource(R.string.flight_server_error)
     val connectionErrorMsg = stringResource(R.string.flight_connection_error)
     val pilotSnippetFormat = stringResource(R.string.flight_pilot_snippet)
+    val myPositionLabel = stringResource(R.string.flight_my_position)
+    val defaultFlightName = stringResource(R.string.flight_default_name)
+    val ghostEmptyMsg = stringResource(R.string.flight_ghost_empty)
+    val ghostErrorMsg = stringResource(R.string.flight_ghost_error)
+    val ghostSnippetFormat = stringResource(R.string.flight_ghost_snippet)
+
+    LaunchedEffect(activeGhostRun) {
+        val run = activeGhostRun
+        if (run == null) {
+            ghostTrack = null
+            ghostLoading = false
+            ghostMessage = null
+            return@LaunchedEffect
+        }
+
+        ghostLoading = true
+        ghostMessage = null
+        flightTrackRepository.getGhostTrack(run.id)
+            .onSuccess { detail ->
+                val trackPoints = detail.actualPath
+                if (trackPoints.isEmpty()) {
+                    ghostMessage = ghostEmptyMsg
+                    ghostTrack = null
+                } else {
+                    ghostTrack = GhostTrack(
+                        name = run.pilotName,
+                        durationMinutes = run.totalDurationSeconds / 60,
+                        path = trackPoints,
+                    )
+                }
+            }
+            .onFailure {
+                // Fallback to simulation using waypoint times
+                ghostTrack = GhostTrack(
+                    name = run.pilotName,
+                    durationMinutes = run.totalDurationSeconds / 60,
+                    path = run.waypointTimes.map { wp ->
+                        FlightPoint(
+                            lat = wp.lat,
+                            lng = wp.lng,
+                            timestamp = Instant.ofEpochSecond(wp.elapsedSeconds.toLong()).toString(),
+                            altitude = 0.0,
+                            speed = 0.0,
+                            heading = 0.0,
+                            verticalSpeed = 0.0,
+                            pressure = 0.0
+                        )
+                    }
+                )
+                ghostMessage = null
+            }
+        ghostLoading = false
+    }
 
     LaunchedEffect(Unit) {
         val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
@@ -94,20 +172,24 @@ fun FlightScreen() {
         }
     }
 
-    val doSync: suspend (FlightSyncPayload) -> Unit = { payload ->
+    val doFinish: suspend (FlightSyncPayload) -> Unit = { payload ->
         val pendingDao = AppDatabase.getInstance(context).pendingFlightDao()
         val inProgressDao = AppDatabase.getInstance(context).inProgressFlightDao()
         pendingDao.save(PendingFlightEntity(payloadJson = gson.toJson(payload)))
         isUploading = true
         try {
-            val response = FlightApiService.api.syncFlight(payload)
+            val response = FlightApiService.api.finishFlight(payload)
             if (response.isSuccessful) {
                 pendingDao.delete()
                 inProgressDao.deleteAll()
+                FlightRepository.clearFlight()
+                ApiClient.getSessionManager().clearClientFlightId()
                 uploadDone = true
             } else {
                 syncError = serverErrorMsg.format(response.code())
             }
+        } catch (e: IOException) {
+            isOffline = true
         } catch (e: Exception) {
             syncError = connectionErrorMsg.format(e.localizedMessage ?: "desconocido")
         } finally {
@@ -139,11 +221,16 @@ fun FlightScreen() {
     }
 
     val currentPoint = flightPoints.lastOrNull()
+    val ghostSnapshot = remember(ghostEnabled, isTracking, ghostTrack, elapsedSeconds) {
+        if (ghostEnabled && isTracking) ghostTrack?.snapshotAt(elapsedSeconds) else null
+    }
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(START_LATLNG, 13f)
     }
 
-    val mapUiSettings = remember { MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true) }
+    val mapUiSettings = remember { MapUiSettings(zoomControlsEnabled = true, myLocationButtonEnabled = true) }
+    val density = LocalDensity.current
+    var statsCardHeightPx by remember { mutableIntStateOf(0) }
     val mapProperties = remember(isTracking) {
         MapProperties(
             isMyLocationEnabled = isTracking,
@@ -151,7 +238,13 @@ fun FlightScreen() {
         )
     }
     val polylinePoints = remember(flightPoints.size) { flightPoints.map { LatLng(it.lat, it.lng) } }
-    val markerState = remember { MarkerState(position = START_LATLNG) }
+    val ownMarkerState = remember { MarkerState(position = START_LATLNG) }
+    val ghostPolylinePoints = remember(ghostTrack) { ghostTrack?.path?.map { LatLng(it.lat, it.lng) }.orEmpty() }
+    val ghostMarkerState = remember { MarkerState(position = START_LATLNG) }
+
+    val circuitPoints = remember(activeCircuit) {
+        activeCircuit?.waypoints?.sortedBy { it.order }?.map { LatLng(it.lat, it.lng) } ?: emptyList()
+    }
 
     var hasCenteredInitially by remember { mutableStateOf(false) }
 
@@ -162,13 +255,23 @@ fun FlightScreen() {
     LaunchedEffect(currentPoint) {
         currentPoint?.let {
             if (it.lat != 0.0 && it.lng != 0.0) {
-                markerState.position = LatLng(it.lat, it.lng)
-                if (isTracking && !hasCenteredInitially) {
-                    cameraPositionState.position =
-                        CameraPosition.fromLatLngZoom(LatLng(it.lat, it.lng), 15f)
-                    hasCenteredInitially = true
+                val pos = LatLng(it.lat, it.lng)
+                ownMarkerState.position = pos
+                if (isTracking) {
+                    if (!hasCenteredInitially) {
+                        cameraPositionState.position = CameraPosition.fromLatLngZoom(pos, 15f)
+                        hasCenteredInitially = true
+                    } else {
+                        cameraPositionState.animate(CameraUpdateFactory.newLatLng(pos))
+                    }
                 }
             }
+        }
+    }
+
+    LaunchedEffect(ghostSnapshot?.point) {
+        ghostSnapshot?.point?.let {
+            ghostMarkerState.position = LatLng(it.lat, it.lng)
         }
     }
 
@@ -189,19 +292,23 @@ fun FlightScreen() {
                             verticalSpeed = it.verticalSpeed, pressure = it.pressure
                         )
                     }
+                    val recoveredId = ApiClient.getSessionManager().getClientFlightId()
+                        ?: java.util.UUID.randomUUID().toString()
                     val payload = FlightSyncPayload(
-                        pilotId = FlightRepository.getPilotId(),
+                        clientFlightId = recoveredId,
                         startTime = points.first().timestamp,
                         endTime = Instant.now().toString(),
                         path = points
                     )
-                    scope.launch { doSync(payload) }
+                    scope.launch { doFinish(payload) }
                 }) { Text(stringResource(R.string.flight_pending_upload)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showInterruptedDialog = false
                     interruptedPoints = emptyList()
+                    FlightRepository.clearFlight()
+                    ApiClient.getSessionManager().clearClientFlightId()
                     scope.launch {
                         AppDatabase.getInstance(context).inProgressFlightDao().deleteAll()
                     }
@@ -221,13 +328,15 @@ fun FlightScreen() {
                     showPendingDialog = false
                     showDialog = true
                     val payload = pendingPayload!!
-                    scope.launch { doSync(payload) }
+                    scope.launch { doFinish(payload) }
                 }) { Text(stringResource(R.string.flight_pending_upload)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showPendingDialog = false
                     pendingPayload = null
+                    FlightRepository.clearFlight()
+                    ApiClient.getSessionManager().clearClientFlightId()
                     scope.launch { AppDatabase.getInstance(context).pendingFlightDao().delete() }
                 }) { Text(stringResource(R.string.flight_pending_discard)) }
             }
@@ -243,6 +352,7 @@ fun FlightScreen() {
                 Text(
                     when {
                         uploadDone -> stringResource(R.string.flight_sync_success_title)
+                        isOffline -> stringResource(R.string.flight_finished_title)
                         syncError != null -> stringResource(R.string.flight_sync_error_title)
                         else -> stringResource(R.string.flight_finished_title)
                     }
@@ -256,6 +366,7 @@ fun FlightScreen() {
                         Text(stringResource(R.string.flight_uploading_message))
                     }
                     uploadDone -> Text(stringResource(R.string.flight_sync_success_message))
+                    isOffline -> Text(stringResource(R.string.flight_offline_save_message))
                     syncError != null -> Text(syncError!!)
                     else -> Text(stringResource(R.string.flight_sync_summary, durationMin.toInt(), flightPoints.size))
                 }
@@ -271,7 +382,7 @@ fun FlightScreen() {
                                     val pending = dao.get()
                                     if (pending != null) {
                                         val payload = gson.fromJson(pending.payloadJson, FlightSyncPayload::class.java)
-                                        doSync(payload)
+                                        doFinish(payload)
                                     }
                                 }
                             }) { Text(stringResource(R.string.flight_retry_button)) }
@@ -280,8 +391,43 @@ fun FlightScreen() {
                             showDialog = false
                             uploadDone = false
                             syncError = null
+                            isOffline = false
                             FlightRepository.setTracking(false)
                         }) { Text(stringResource(R.string.flight_close_button)) }
+                    }
+                }
+            },
+        )
+    }
+
+    uploadState?.let { state ->
+        AlertDialog(
+            onDismissRequest = {},
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(stringResource(R.string.flight_circuit_finished_title)) },
+            text = {
+                when (state) {
+                    is RunUploadState.Uploading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.flight_circuit_finished_uploading))
+                    }
+                    is RunUploadState.Success -> Text(
+                        stringResource(
+                            R.string.flight_circuit_finished_success,
+                            state.run.rank,
+                            formatDuration(state.run.totalDurationSeconds),
+                        )
+                    )
+                    is RunUploadState.Error -> Text(
+                        stringResource(R.string.flight_circuit_finished_error, state.message)
+                    )
+                }
+            },
+            confirmButton = {
+                if (state !is RunUploadState.Uploading) {
+                    TextButton(onClick = { ActiveCircuitRepository.acknowledgeResult() }) {
+                        Text(stringResource(R.string.flight_circuit_finished_close))
                     }
                 }
             },
@@ -294,6 +440,7 @@ fun FlightScreen() {
             cameraPositionState = cameraPositionState,
             uiSettings = mapUiSettings,
             properties = mapProperties,
+            contentPadding = PaddingValues(bottom = with(density) { statsCardHeightPx.toDp() }),
         ) {
             if (polylinePoints.size > 1) {
                 Polyline(
@@ -302,20 +449,58 @@ fun FlightScreen() {
                     width = 5f,
                 )
             }
+
+            if (circuitPoints.isNotEmpty()) {
+                if (circuitPoints.size > 1) {
+                    Polyline(points = circuitPoints, color = Secondary, width = 5f)
+                }
+                activeCircuit?.waypoints?.sortedBy { it.order }?.forEach { wp ->
+                    Marker(
+                        state = MarkerState(position = LatLng(wp.lat, wp.lng)),
+                        title = "#${wp.order}",
+                    )
+                }
+            }
+
+            if (ghostEnabled && ghostPolylinePoints.size > 1) {
+                Polyline(
+                    points = ghostPolylinePoints,
+                    color = GhostGreen,
+                    width = 4f,
+                )
+            }
             if (currentPoint != null) {
-                Marker(
-                    state = markerState,
-                    title = stringResource(R.string.flight_my_position),
+                PlaneMarker(
+                    markerState = ownMarkerState,
+                    headingDegrees = (currentPoint.heading ?: 0.0).toFloat(),
+                    tint = Primary,
+                    title = myPositionLabel,
+                )
+            }
+            if (ghostSnapshot != null) {
+                PlaneMarker(
+                    markerState = ghostMarkerState,
+                    headingDegrees = ghostSnapshot.point.heading.toFloat(),
+                    tint = GhostGreen,
+                    title = stringResource(R.string.flight_ghost_marker),
+                    snippet = ghostSnippetFormat.format(formatElapsed(ghostSnapshot.elapsedSeconds)),
                 )
             }
 
             activePilots.forEach { pilot ->
-                if (pilot.pilotId != com.horas_al_mando.ham_android.model.MockData.PILOT_ID) {
-                    Marker(
-                        state = rememberMarkerState(position = LatLng(pilot.lat, pilot.lng)),
+                if (pilot.pilotId != FlightRepository.getPilotId()) {
+                    val pilotMarkerState = remember(pilot.pilotId) {
+                        MarkerState(position = LatLng(pilot.lat, pilot.lng))
+                    }
+                    LaunchedEffect(pilot.lat, pilot.lng) {
+                        pilotMarkerState.position = LatLng(pilot.lat, pilot.lng)
+                    }
+                    PlaneMarker(
+                        markerState = pilotMarkerState,
+                        headingDegrees = pilot.heading.toFloat(),
+                        tint = PilotOrange,
                         title = pilot.name,
                         snippet = pilotSnippetFormat.format(pilot.altitude, pilot.speed),
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                     )
                 }
             }
@@ -325,22 +510,49 @@ fun FlightScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .padding(16.dp),
+                .onGloballyPositioned { statsCardHeightPx = it.size.height }
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Surface),
             border = BorderStroke(1.dp, Outline),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
             Column(
-                Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (activeCircuit != null) {
+                    CircuitRunPanel(
+                        circuitName = activeCircuit!!.name,
+                        timer = formatElapsed(elapsedSeconds),
+                        nextWaypointNumber = circuitPoints.indices.contains(nextWaypointIndex).let {
+                            if (it && runInProgress) nextWaypointIndex else -1
+                        },
+                        nextWaypointLat = activeCircuit!!.waypoints.getOrNull(nextWaypointIndex)?.lat,
+                        nextWaypointLng = activeCircuit!!.waypoints.getOrNull(nextWaypointIndex)?.lng,
+                        arrowRotation = ((bearingToNext ?: 0f) - azimuth),
+                        showProgress = runInProgress,
+                        onCancel = { ActiveCircuitRepository.disarm() },
+                    )
+                    HorizontalDivider(color = Outline)
+                }
+
                 StatsGrid(
                     altitude = currentPoint?.altitude?.let { "%.0f".format(it) } ?: "--",
                     speed = currentPoint?.speed?.let { "%.0f".format(it) } ?: "--",
                     heading = currentPoint?.heading?.let { "%.0f".format(it) } ?: "--",
                     elapsed = formatElapsed(elapsedSeconds),
                 )
+
+                if (activeGhostRun != null) {
+                    GhostModeRow(
+                        enabled = ghostEnabled,
+                        onEnabledChange = { ghostEnabled = it },
+                        ghostTrack = ghostTrack,
+                        isLoading = ghostLoading,
+                        message = ghostMessage,
+                    )
+                }
 
                 if (!isTracking) {
                     Button(
@@ -370,7 +582,7 @@ fun FlightScreen() {
                             val payload = FlightRepository.getSyncPayload()
                             context.stopService(Intent(context, FlightTrackingService::class.java))
                             showDialog = true
-                            scope.launch { doSync(payload) }
+                            scope.launch { doFinish(payload) }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
@@ -384,9 +596,154 @@ fun FlightScreen() {
     }
 }
 
+@Composable
+private fun CircuitRunPanel(
+    circuitName: String,
+    timer: String,
+    nextWaypointNumber: Int,
+    nextWaypointLat: Double?,
+    nextWaypointLng: Double?,
+    arrowRotation: Float,
+    showProgress: Boolean,
+    onCancel: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(circuitName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.flight_circuit_timer, timer))
+            if (showProgress && nextWaypointNumber >= 0) {
+                Text(stringResource(R.string.flight_circuit_next_waypoint, nextWaypointNumber))
+                if (nextWaypointLat != null && nextWaypointLng != null) {
+                    Text(
+                        stringResource(R.string.flight_circuit_coords, nextWaypointLat, nextWaypointLng),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Secondary,
+                    )
+                }
+            }
+            TextButton(onClick = onCancel, contentPadding = PaddingValues(0.dp)) {
+                Text(stringResource(R.string.flight_circuit_cancel_run), color = Destructive)
+            }
+        }
+        if (showProgress) {
+            Icon(
+                imageVector = Icons.Default.Navigation,
+                contentDescription = null,
+                tint = Primary,
+                modifier = Modifier.size(56.dp).rotate(arrowRotation),
+            )
+        }
+    }
+}
+
+private data class GhostTrack(
+    val name: String,
+    val durationMinutes: Int,
+    val path: List<FlightPoint>,
+)
+
+private data class GhostSnapshot(
+    val point: FlightPoint,
+    val elapsedSeconds: Long,
+)
+
+private fun GhostTrack.snapshotAt(elapsedSeconds: Long): GhostSnapshot? {
+    if (path.isEmpty()) return null
+
+    val start = runCatching { Instant.parse(path.first().timestamp) }.getOrNull() ?: return null
+    val target = start.plusSeconds(elapsedSeconds)
+    val first = path.first()
+
+    if (path.size == 1 || elapsedSeconds <= 0) {
+        return GhostSnapshot(first, 0)
+    }
+
+    val nextIndex = path.indexOfFirst { point ->
+        runCatching { !Instant.parse(point.timestamp).isBefore(target) }.getOrDefault(false)
+    }
+
+    if (nextIndex <= 0) {
+        return GhostSnapshot(first, 0)
+    }
+
+    if (nextIndex == -1) {
+        val last = path.last()
+        val lastElapsed = ChronoUnit.SECONDS.between(start, Instant.parse(last.timestamp)).coerceAtLeast(0)
+        return GhostSnapshot(last, lastElapsed)
+    }
+
+    val previous = path[nextIndex - 1]
+    val next = path[nextIndex]
+    val previousInstant = Instant.parse(previous.timestamp)
+    val nextInstant = Instant.parse(next.timestamp)
+    val segmentMillis = ChronoUnit.MILLIS.between(previousInstant, nextInstant).coerceAtLeast(1)
+    val targetMillis = ChronoUnit.MILLIS.between(previousInstant, target).coerceIn(0, segmentMillis)
+    val ratio = targetMillis.toDouble() / segmentMillis.toDouble()
+
+    return GhostSnapshot(
+        point = previous.interpolateTo(next, ratio, target.toString()),
+        elapsedSeconds = ChronoUnit.SECONDS.between(start, target).coerceAtLeast(0),
+    )
+}
+
+private fun FlightPoint.interpolateTo(next: FlightPoint, ratio: Double, timestamp: String): FlightPoint =
+    FlightPoint(
+        lat = lat + (next.lat - lat) * ratio,
+        lng = lng + (next.lng - lng) * ratio,
+        timestamp = timestamp,
+        altitude = altitude + (next.altitude - altitude) * ratio,
+        speed = speed + (next.speed - speed) * ratio,
+        heading = heading + (next.heading - heading) * ratio,
+        verticalSpeed = verticalSpeed + (next.verticalSpeed - verticalSpeed) * ratio,
+        pressure = pressure + (next.pressure - pressure) * ratio,
+    )
+
+@Composable
+private fun GhostModeRow(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    ghostTrack: GhostTrack?,
+    isLoading: Boolean,
+    message: String?,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.flight_ghost_mode),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = when {
+                    isLoading -> stringResource(R.string.flight_ghost_loading)
+                    message != null -> message
+                    ghostTrack != null -> "${stringResource(R.string.flight_ghost_record)}: ${ghostTrack.name} (${ghostTrack.durationMinutes} min)"
+                    else -> stringResource(R.string.flight_ghost_record)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = Secondary,
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+        )
+    }
+}
+
 private fun formatElapsed(seconds: Long): String {
     val h = seconds / 3600
     val m = (seconds % 3600) / 60
     val s = seconds % 60
     return "%02d:%02d:%02d".format(h, m, s)
+}
+
+private fun formatDuration(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return "%02d:%02d".format(m, s)
 }

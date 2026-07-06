@@ -66,6 +66,14 @@
     <string name="flight_pilot_snippet">Alt: %1$.0f ft - Vel: %2$.0f kt</string>
     <string name="flight_server_error">Error del servidor: %1$d</string>
     <string name="flight_connection_error">Error de conexión: %1$s</string>
+    <string name="flight_offline_save_message">Vuelo guardado localmente. Se sincronizará automáticamente al recuperar la conexión.</string>
+    <string name="flight_ghost_mode">Modo Ghost</string>
+    <string name="flight_ghost_record">Récord personal</string>
+    <string name="flight_ghost_loading">Cargando fantasma...</string>
+    <string name="flight_ghost_empty">No hay vuelos previos para competir.</string>
+    <string name="flight_ghost_error">No se pudo cargar el fantasma.</string>
+    <string name="flight_ghost_marker">Fantasma</string>
+    <string name="flight_ghost_snippet">Tiempo: %1$s</string>
 
     <!-- Interrupted flight -->
     <string name="flight_interrupted_title">Vuelo interrumpido</string>
@@ -84,4 +92,59 @@
     <string name="stats_speed">Velocidad (kt)</string>
     <string name="stats_heading">Rumbo (°)</string>
     <string name="stats_elapsed">Tiempo</string>
+
+    <!-- Circuits -->
+    <string name="circuits_tab">Circuitos</string>
+    <string name="circuits_title">Circuitos Aéreos</string>
+    <string name="circuits_empty">No hay circuitos para mostrar.</string>
+    <string name="circuits_create_button">Crear Circuito</string>
+    <string name="circuits_filter_mine">Solo míos</string>
+    <string name="circuits_filter_all">Todos</string>
+    <string name="circuits_filter_range">Rango: %1$d km</string>
+    <string name="circuits_card_creator">Por %1$s</string>
+    <string name="circuits_card_distance_total">Distancia total: %1$.1f km</string>
+    <string name="circuits_card_distance_from_user">A %1$.1f km de vos</string>
+    <string name="circuits_card_waypoints">%1$d waypoints</string>
+    <string name="circuits_load_error">Error al cargar circuitos.</string>
+
+    <!-- Circuit detail -->
+    <string name="circuit_detail_not_found">Circuito no encontrado.</string>
+    <string name="circuit_detail_back">Volver</string>
+    <string name="circuit_detail_total_distance">Distancia total: %1$.1f km</string>
+    <string name="circuit_detail_creator">Creado por %1$s</string>
+    <string name="circuit_detail_runs_title">Recorridos</string>
+    <string name="circuit_detail_runs_empty">Aún no hay recorridos.</string>
+    <string name="circuit_detail_run_row">#%1$d · %2$s · %3$s</string>
+    <string name="circuit_detail_run_button">Recorrer</string>
+    <string name="circuit_detail_delete_button">Eliminar</string>
+    <string name="circuit_detail_delete_title">Eliminar circuito</string>
+    <string name="circuit_detail_delete_message">¿Seguro que querés eliminar este circuito? También se borrarán sus recorridos.</string>
+    <string name="circuit_detail_run_confirm_title">Recorrer circuito</string>
+    <string name="circuit_detail_run_confirm_message">Se activará este circuito en la pantalla de Vuelo. Iniciá el vuelo para comenzar el recorrido.</string>
+    <string name="circuit_common_confirm">Confirmar</string>
+    <string name="circuit_common_cancel">Cancelar</string>
+
+    <!-- Create circuit -->
+    <string name="create_circuit_title">Crear Circuito</string>
+    <string name="create_circuit_add_waypoint">Agregar waypoint</string>
+    <string name="create_circuit_final_waypoint">Waypoint final</string>
+    <string name="create_circuit_close_loop">Cerrar circuito</string>
+    <string name="create_circuit_name_label">Nombre del circuito</string>
+    <string name="create_circuit_confirm">Crear</string>
+    <string name="create_circuit_cancel">Cancelar</string>
+    <string name="create_circuit_count">%1$d waypoints</string>
+    <string name="create_circuit_success">Circuito creado correctamente.</string>
+    <string name="create_circuit_error">Error al crear el circuito.</string>
+    <string name="create_circuit_hint">Mové el mapa y marcá los waypoints.</string>
+
+    <!-- Flight circuit run -->
+    <string name="flight_circuit_cancel_run">Cancelar recorrido</string>
+    <string name="flight_circuit_next_waypoint">Próximo waypoint #%1$d</string>
+    <string name="flight_circuit_coords">%1$.5f, %2$.5f</string>
+    <string name="flight_circuit_timer">Recorrido: %1$s</string>
+    <string name="flight_circuit_finished_title">¡Recorrido finalizado!</string>
+    <string name="flight_circuit_finished_uploading">Subiendo recorrido…</string>
+    <string name="flight_circuit_finished_success">Puesto #%1$d · Tiempo %2$s. Podés verlo en Circuitos.</string>
+    <string name="flight_circuit_finished_error">No se pudo subir el recorrido: %1$s</string>
+    <string name="flight_circuit_finished_close">Cerrar</string>
 </resources>

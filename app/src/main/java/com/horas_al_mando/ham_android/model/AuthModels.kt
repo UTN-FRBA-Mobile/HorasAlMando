@@ -29,6 +29,10 @@ data class AuthResponse(
     val active: Boolean?
 )
 
+data class RefreshResponse(
+    val token: String?
+)
+
 data class UserProfile(
     val id: String,
     val username: String,
@@ -36,5 +40,6 @@ data class UserProfile(
     val firstName: String,
     val lastName: String,
     val license: String?,
+    @Deprecated("No longer displayed in the ProfileScreen UI. Scheduled for removal once backend supports it.")
     val totalHours: String?
 )
