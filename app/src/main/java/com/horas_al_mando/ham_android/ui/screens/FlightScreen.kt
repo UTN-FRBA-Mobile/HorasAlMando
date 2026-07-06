@@ -49,6 +49,7 @@ import com.horas_al_mando.ham_android.ui.PlaneMarker
 import com.horas_al_mando.ham_android.ui.components.StatsGrid
 import com.horas_al_mando.ham_android.ui.theme.*
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -83,6 +84,7 @@ fun FlightScreen() {
     var isUploading by remember { mutableStateOf(false) }
     var uploadDone by remember { mutableStateOf(false) }
     var syncError by remember { mutableStateOf<String?>(null) }
+    var isOffline by remember { mutableStateOf(false) }
     var pendingPayload by remember { mutableStateOf<FlightSyncPayload?>(null) }
     var showPendingDialog by remember { mutableStateOf(false) }
     var showInterruptedDialog by remember { mutableStateOf(false) }
@@ -186,6 +188,8 @@ fun FlightScreen() {
             } else {
                 syncError = serverErrorMsg.format(response.code())
             }
+        } catch (e: IOException) {
+            isOffline = true
         } catch (e: Exception) {
             syncError = connectionErrorMsg.format(e.localizedMessage ?: "desconocido")
         } finally {
@@ -348,6 +352,7 @@ fun FlightScreen() {
                 Text(
                     when {
                         uploadDone -> stringResource(R.string.flight_sync_success_title)
+                        isOffline -> stringResource(R.string.flight_finished_title)
                         syncError != null -> stringResource(R.string.flight_sync_error_title)
                         else -> stringResource(R.string.flight_finished_title)
                     }
@@ -361,6 +366,7 @@ fun FlightScreen() {
                         Text(stringResource(R.string.flight_uploading_message))
                     }
                     uploadDone -> Text(stringResource(R.string.flight_sync_success_message))
+                    isOffline -> Text(stringResource(R.string.flight_offline_save_message))
                     syncError != null -> Text(syncError!!)
                     else -> Text(stringResource(R.string.flight_sync_summary, durationMin.toInt(), flightPoints.size))
                 }
@@ -385,6 +391,7 @@ fun FlightScreen() {
                             showDialog = false
                             uploadDone = false
                             syncError = null
+                            isOffline = false
                             FlightRepository.setTracking(false)
                         }) { Text(stringResource(R.string.flight_close_button)) }
                     }
