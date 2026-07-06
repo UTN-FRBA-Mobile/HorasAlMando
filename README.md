@@ -2,7 +2,7 @@
 
 **Tu bitácora de vuelo, radar y competencias — todo en una app.**
 
-Aplicación Android para pilotos que registra tus vuelos con GPS en tiempo real, te muestra a otros pilotos en el aire y te permite competir en circuitos aéreos. Funciona con el backend de **ham-core-api**.
+Aplicación Android para pilotos que registra tus vuelos con GPS en tiempo real, te muestra a otros pilotos en el aire y te permite competir en circuitos aéreos.
 
 ---
 
@@ -12,13 +12,13 @@ Aplicación Android para pilotos que registra tus vuelos con GPS en tiempo real,
 Horas Al Mando — Bitácora y Radar de Vuelo
 
 ### Descripción corta
-Registrá tus vuelos con GPS, competí en circuitos y volá junto a otros pilotos.
+Registrá tus vuelos, competí en circuitos y volá junto a otros pilotos.
 
 ### Descripción completa
 
 **Horas Al Mando (HAM)** es la app pensada para pilotos que quieren registrar cada vuelo, mejorar su técnica y compartir el cielo con la comunidad.
 
-Iniciá un vuelo y HAM registra automáticamente tu recorrido con datos precisos en tiempo real: **altitud, velocidad, rumbo y tiempo de vuelo**. Al finalizar, todo queda guardado en tu bitácora personal, con tus horas totales acumuladas.
+Iniciá un vuelo y HAM registra automáticamente tu recorrido con datos precisos en tiempo real: **altitud, velocidad, rumbo y tiempo de vuelo**. Al finalizar, todo queda guardado en tu bitácora personal.
 
 **✈️ Registrá tus vuelos**
 - Seguimiento GPS en tiempo real con altitud, velocidad y rumbo.
