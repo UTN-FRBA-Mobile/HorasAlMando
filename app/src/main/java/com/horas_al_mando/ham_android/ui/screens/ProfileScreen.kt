@@ -73,8 +73,6 @@ fun ProfileScreen(repository: AuthRepository, onLogout: () -> Unit) {
                         ProfileRow(label = stringResource(R.string.profile_label_username), value = "@${it.username}")
                         HorizontalDivider(color = Outline, modifier = Modifier.padding(vertical = 8.dp))
                         ProfileRow(label = stringResource(R.string.profile_label_license), value = it.license ?: stringResource(R.string.profile_license_none))
-                        HorizontalDivider(color = Outline, modifier = Modifier.padding(vertical = 8.dp))
-                        ProfileRow(label = stringResource(R.string.profile_label_total_hours), value = it.totalHours ?: "0")
                     }
                 }
             }

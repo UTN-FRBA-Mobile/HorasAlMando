@@ -40,5 +40,6 @@ data class UserProfile(
     val firstName: String,
     val lastName: String,
     val license: String?,
+    @Deprecated("No longer displayed in the ProfileScreen UI. Scheduled for removal once backend supports it.")
     val totalHours: String?
 )
